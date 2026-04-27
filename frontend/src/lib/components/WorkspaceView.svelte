@@ -38,6 +38,7 @@
   let testPending = false
   let reflectionPending = false
   let actionError = ''
+  let lastEndpointFingerprint = ''
 
   function buildEndpointPreset(): EndpointPreset {
     const tlsMode = endpoint.tls.mode
@@ -57,8 +58,24 @@
     }
   }
 
+  function buildEndpointFingerprint(): string {
+    return JSON.stringify(buildEndpointPreset())
+  }
+
+  $: {
+    const nextEndpointFingerprint = buildEndpointFingerprint()
+    if (lastEndpointFingerprint !== '' && nextEndpointFingerprint !== lastEndpointFingerprint) {
+      endpointTestResult = null
+      reflectionCatalog = null
+      actionError = ''
+    }
+
+    lastEndpointFingerprint = nextEndpointFingerprint
+  }
+
   async function runEndpointTest(): Promise<void> {
     actionError = ''
+    endpointTestResult = null
     testPending = true
 
     try {
@@ -72,6 +89,7 @@
 
   async function runReflectionLoad(): Promise<void> {
     actionError = ''
+    reflectionCatalog = null
     reflectionPending = true
 
     try {
@@ -175,10 +193,10 @@
       </div>
 
       <div class="pill-row">
-        <button class="ghost-button" disabled={testPending} on:click={runEndpointTest}>
+        <button class="ghost-button" disabled={testPending || reflectionPending} on:click={runEndpointTest}>
           {testPending ? 'Testing endpoint…' : 'Run endpoint preflight'}
         </button>
-        <button class="action-button" disabled={reflectionPending} on:click={runReflectionLoad}>
+        <button class="action-button" disabled={testPending || reflectionPending} on:click={runReflectionLoad}>
           {reflectionPending ? 'Loading reflection…' : 'Load reflection catalog'}
         </button>
       </div>
