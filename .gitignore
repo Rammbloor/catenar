@@ -1,0 +1,11 @@
+build/bin
+node_modules
+frontend/node_modules
+frontend/dist
+frontend/package.json.md5
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+tmp
