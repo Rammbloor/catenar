@@ -3,6 +3,8 @@
 import {contracts} from '../models';
 import {appshell} from '../models';
 
+export function CatalogLoadFromReflection(arg1:contracts.CatalogLoadFromReflectionInput):Promise<contracts.CatalogLoadFromReflectionResponse>;
+
 export function EndpointTest(arg1:contracts.EndpointTestInput):Promise<contracts.EndpointTestResponse>;
 
 export function ShellBootstrap():Promise<appshell.BootstrapResponse>;

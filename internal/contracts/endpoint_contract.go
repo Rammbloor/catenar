@@ -82,3 +82,42 @@ type EndpointTestResponse struct {
 	Data  *EndpointTestResult `json:"data,omitempty"`
 	Error *ErrorEnvelope      `json:"error,omitempty"`
 }
+
+type CatalogLoadFromReflectionInput struct {
+	Endpoint EndpointPreset `json:"endpoint"`
+}
+
+type CatalogMessageRef struct {
+	Name        string `json:"name"`
+	FullName    string `json:"fullName"`
+	IsWellKnown bool   `json:"isWellKnown"`
+}
+
+type CatalogMethod struct {
+	Name         string            `json:"name"`
+	FullName     string            `json:"fullName"`
+	RPCType      RPCType           `json:"rpcType"`
+	RequestType  CatalogMessageRef `json:"requestType"`
+	ResponseType CatalogMessageRef `json:"responseType"`
+}
+
+type CatalogService struct {
+	Name     string          `json:"name"`
+	FullName string          `json:"fullName"`
+	Methods  []CatalogMethod `json:"methods"`
+}
+
+type ReflectionCatalogResult struct {
+	Endpoint       EndpointPreset          `json:"endpoint"`
+	Services       []CatalogService        `json:"services"`
+	WellKnownTypes []CatalogMessageRef     `json:"wellKnownTypes,omitempty"`
+	Diagnostic     *DiagnosticsUpdateEvent `json:"diagnostic,omitempty"`
+	LoadedAt       string                  `json:"loadedAt"`
+	DurationMs     int64                   `json:"durationMs"`
+}
+
+type CatalogLoadFromReflectionResponse struct {
+	Ok    bool                     `json:"ok"`
+	Data  *ReflectionCatalogResult `json:"data,omitempty"`
+	Error *ErrorEnvelope           `json:"error,omitempty"`
+}

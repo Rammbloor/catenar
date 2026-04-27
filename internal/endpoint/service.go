@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"tether/internal/contracts"
 )
 
@@ -76,11 +78,31 @@ type TransportAdapter interface {
 	TestEndpoint(ctx context.Context, cfg EndpointRuntimeConfig) EndpointProbeReport
 }
 
+type GRPCClientConn interface {
+	grpc.ClientConnInterface
+	Close() error
+}
+
+type GRPCRuntime interface {
+	Dial(ctx context.Context, cfg EndpointRuntimeConfig) (GRPCClientConn, *endpointDiagnostic)
+}
+
+type ReflectionCatalog struct {
+	Services       []contracts.CatalogService
+	WellKnownTypes []contracts.CatalogMessageRef
+}
+
+type ReflectionClient interface {
+	LoadCatalog(ctx context.Context, conn GRPCClientConn, endpointPreset contracts.EndpointPreset) (ReflectionCatalog, *endpointDiagnostic)
+}
+
 type ServiceDependencies struct {
 	AppDataDir       string
 	WorkspaceManager WorkspaceManager
 	SecretStore      SecretStore
 	TransportAdapter TransportAdapter
+	GRPCRuntime      GRPCRuntime
+	ReflectionClient ReflectionClient
 	Now              func() time.Time
 }
 
@@ -88,6 +110,8 @@ type Service struct {
 	workspaceManager WorkspaceManager
 	secretStore      SecretStore
 	transportAdapter TransportAdapter
+	grpcRuntime      GRPCRuntime
+	reflectionClient ReflectionClient
 	emitter          EventEmitter
 	now              func() time.Time
 }
@@ -115,10 +139,24 @@ func NewService(deps ServiceDependencies) *Service {
 		})
 	}
 
+	runtime := deps.GRPCRuntime
+	if runtime == nil {
+		runtime = newGRPCRuntime(grpcTransportAdapterOptions{
+			systemCertPool: x509.SystemCertPool,
+		})
+	}
+
+	reflectionClient := deps.ReflectionClient
+	if reflectionClient == nil {
+		reflectionClient = newServerReflectionClient()
+	}
+
 	return &Service{
 		workspaceManager: manager,
 		secretStore:      store,
 		transportAdapter: adapter,
+		grpcRuntime:      runtime,
+		reflectionClient: reflectionClient,
 		now:              now,
 	}
 }
@@ -225,6 +263,86 @@ func (s *Service) EndpointTest(ctx context.Context, input contracts.EndpointTest
 	}
 
 	return contracts.EndpointTestResponse{
+		Ok:   true,
+		Data: &result,
+	}
+}
+
+func (s *Service) CatalogLoadFromReflection(ctx context.Context, input contracts.CatalogLoadFromReflectionInput) contracts.CatalogLoadFromReflectionResponse {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	issues := ValidateEndpointPreset(input.Endpoint)
+	if len(issues) > 0 {
+		first := issues[0]
+		return contracts.CatalogLoadFromReflectionResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     first.Code,
+				Category: contracts.ErrorCategoryValidation,
+				Message:  first.Message,
+				Details: map[string]string{
+					"field":      first.Field,
+					"issueCount": fmt.Sprintf("%d", len(issues)),
+				},
+			},
+		}
+	}
+
+	scope, endpointPreset, err := s.workspaceManager.PrepareEndpointTest(ctx, contracts.EndpointTestInput{Endpoint: input.Endpoint})
+	if err != nil {
+		return contracts.CatalogLoadFromReflectionResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.workspace_context_unavailable",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The runtime could not prepare workspace context for the reflection load.",
+				Details: map[string]string{
+					"cause": err.Error(),
+				},
+			},
+		}
+	}
+
+	startedAt := s.now().UTC()
+	runtimeCfg, prepDiagnostic := s.resolveRuntimeConfig(ctx, scope, endpointPreset)
+	if prepDiagnostic != nil {
+		s.emitDiagnostic("catalog-reflection", startedAt, prepDiagnostic)
+		return failureCatalogResponse(prepDiagnostic)
+	}
+
+	probeReport := s.transportAdapter.TestEndpoint(ctx, runtimeCfg)
+	if !probeReport.GRPCReady || !probeReport.GRPCReadyProven {
+		s.emitDiagnostic("catalog-reflection", startedAt, probeReport.Diagnostic)
+		return failureCatalogResponse(probeReport.Diagnostic)
+	}
+
+	conn, runtimeDiagnostic := s.grpcRuntime.Dial(ctx, runtimeCfg)
+	if runtimeDiagnostic != nil {
+		s.emitDiagnostic("catalog-reflection", startedAt, runtimeDiagnostic)
+		return failureCatalogResponse(runtimeDiagnostic)
+	}
+	defer func() {
+		_ = conn.Close()
+	}()
+
+	catalog, reflectionDiagnostic := s.reflectionClient.LoadCatalog(ctx, conn, endpointPreset)
+	event := s.emitDiagnostic("catalog-reflection", startedAt, reflectionDiagnostic)
+	if reflectionDiagnostic != nil && reflectionDiagnostic.Level == "error" {
+		return failureCatalogResponse(reflectionDiagnostic)
+	}
+
+	result := contracts.ReflectionCatalogResult{
+		Endpoint:       endpointPreset,
+		Services:       catalog.Services,
+		WellKnownTypes: catalog.WellKnownTypes,
+		Diagnostic:     event,
+		LoadedAt:       startedAt.Format(time.RFC3339Nano),
+		DurationMs:     time.Since(startedAt).Milliseconds(),
+	}
+
+	return contracts.CatalogLoadFromReflectionResponse{
 		Ok:   true,
 		Data: &result,
 	}
@@ -439,6 +557,29 @@ func copyDetails(details map[string]string) map[string]string {
 	}
 
 	return cloned
+}
+
+func failureCatalogResponse(diagnostic *endpointDiagnostic) contracts.CatalogLoadFromReflectionResponse {
+	if diagnostic == nil {
+		return contracts.CatalogLoadFromReflectionResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.reflection_load_failed",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The reflection catalog could not be loaded.",
+			},
+		}
+	}
+
+	return contracts.CatalogLoadFromReflectionResponse{
+		Ok: false,
+		Error: &contracts.ErrorEnvelope{
+			Code:     diagnostic.Code,
+			Category: diagnostic.Category,
+			Message:  diagnostic.Message,
+			Details:  copyDetails(diagnostic.Details),
+		},
+	}
 }
 
 type transientWorkspaceManager struct{}

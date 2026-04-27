@@ -62,6 +62,25 @@ func (a *App) EndpointTest(input contracts.EndpointTestInput) contracts.Endpoint
 	return a.endpoint.EndpointTest(a.ctx, input)
 }
 
+// CatalogLoadFromReflection loads a service and method catalog from gRPC Server Reflection.
+func (a *App) CatalogLoadFromReflection(input contracts.CatalogLoadFromReflectionInput) contracts.CatalogLoadFromReflectionResponse {
+	if a.ctx == nil {
+		return contracts.CatalogLoadFromReflectionResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.runtime_not_ready",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The Wails runtime context is not ready yet.",
+				Details: map[string]string{
+					"expectedHook": "startup",
+				},
+			},
+		}
+	}
+
+	return a.endpoint.CatalogLoadFromReflection(a.ctx, input)
+}
+
 type wailsEmitter struct {
 	ctx context.Context
 }

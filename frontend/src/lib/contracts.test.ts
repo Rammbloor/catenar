@@ -3,6 +3,7 @@ import {
   ENDPOINT_CHECK_OUTCOMES,
   ENDPOINT_CHECK_STAGES,
   FRONTEND_CONTRACT_MANIFEST,
+  RPC_TYPES,
   TLS_MODES,
   verifyContractManifest,
 } from './contracts'
@@ -24,6 +25,7 @@ describe('verifyContractManifest', () => {
   })
 
   it('exposes the endpoint and TLS contract enums expected by Slice 1.1', () => {
+    expect(RPC_TYPES).toEqual(['unary', 'server_stream', 'client_stream', 'bidi_stream'])
     expect(TLS_MODES).toEqual(['plaintext', 'system_ca', 'custom_ca', 'mtls'])
     expect(ENDPOINT_CHECK_STAGES).toEqual([
       'target_resolution',

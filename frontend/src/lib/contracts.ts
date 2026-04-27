@@ -60,6 +60,7 @@ export const STREAM_STATES = [
 export const TERMINAL_STREAM_STATES = ['closed', 'cancelled', 'error'] as const
 
 export const SESSION_CONDITIONS = ['truncated'] as const
+export const RPC_TYPES = ['unary', 'server_stream', 'client_stream', 'bidi_stream'] as const
 export const TLS_MODES = ['plaintext', 'system_ca', 'custom_ca', 'mtls'] as const
 export const ENDPOINT_CHECK_STAGES = [
   'target_resolution',
@@ -77,6 +78,7 @@ export type AppOverlay = (typeof APP_OVERLAYS)[number]
 export type StreamState = (typeof STREAM_STATES)[number]
 export type TerminalStreamState = (typeof TERMINAL_STREAM_STATES)[number]
 export type SessionCondition = (typeof SESSION_CONDITIONS)[number]
+export type RPCType = (typeof RPC_TYPES)[number]
 export type TLSMode = (typeof TLS_MODES)[number]
 export type EndpointCheckStage = (typeof ENDPOINT_CHECK_STAGES)[number]
 export type EndpointCheckOutcome = (typeof ENDPOINT_CHECK_OUTCOMES)[number]
@@ -243,6 +245,45 @@ export interface EndpointTestResult {
 export interface EndpointTestResponse {
   ok: boolean
   data?: EndpointTestResult
+  error?: ErrorEnvelope
+}
+
+export interface CatalogLoadFromReflectionInput {
+  endpoint: EndpointPreset
+}
+
+export interface CatalogMessageRef {
+  name: string
+  fullName: string
+  isWellKnown: boolean
+}
+
+export interface CatalogMethod {
+  name: string
+  fullName: string
+  rpcType: RPCType
+  requestType: CatalogMessageRef
+  responseType: CatalogMessageRef
+}
+
+export interface CatalogService {
+  name: string
+  fullName: string
+  methods: CatalogMethod[]
+}
+
+export interface ReflectionCatalogResult {
+  endpoint: EndpointPreset
+  services: CatalogService[]
+  wellKnownTypes?: CatalogMessageRef[]
+  diagnostic?: DiagnosticsUpdateEvent
+  loadedAt: string
+  durationMs: number
+}
+
+export interface CatalogLoadFromReflectionResponse {
+  ok: boolean
+  data?: ReflectionCatalogResult
   error?: ErrorEnvelope
 }
 

@@ -330,6 +330,15 @@ button {
   color: var(--text);
 }
 
+.card__header,
+.catalog-service__head,
+.catalog-method__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -414,6 +423,74 @@ button {
   color: var(--muted);
 }
 
+.reflection-layout {
+  align-items: start;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 14px;
+  border: 1px solid rgba(157, 187, 255, 0.18);
+  background: rgba(8, 15, 26, 0.88);
+  color: var(--text);
+  padding: 0.85rem 0.95rem;
+}
+
+.field--span-2 {
+  grid-column: span 2;
+}
+
+.catalog-service,
+.catalog-methods,
+.catalog-method {
+  display: grid;
+  gap: 12px;
+}
+
+.catalog-service {
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(11, 19, 33, 0.62);
+  border: 1px solid rgba(157, 187, 255, 0.11);
+}
+
+.catalog-service h4 {
+  margin: 0;
+}
+
+.catalog-method {
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(6, 12, 22, 0.72);
+  border: 1px solid rgba(157, 187, 255, 0.1);
+}
+
+.catalog-method__types {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 1380px) {
   body {
     min-width: 0;
@@ -434,5 +511,13 @@ button {
   .grid-cards,
   .two-column {
     grid-template-columns: 1fr;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .field--span-2 {
+    grid-column: span 1;
   }
 }

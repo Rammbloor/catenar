@@ -56,7 +56,7 @@ func (a *grpcTransportAdapter) TestEndpoint(ctx context.Context, cfg EndpointRun
 		}
 	}
 
-	connectCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Endpoint.ConnectTimeoutMs)*time.Millisecond)
+	connectCtx, cancel := context.WithTimeout(ctx, endpointConnectTimeout(cfg.Endpoint))
 	defer cancel()
 
 	host, _, err := splitHostPort(cfg.Endpoint.Target)
@@ -560,6 +560,10 @@ func buildDialTLSConfig(source *tls.Config, systemPool *x509.CertPool) *tls.Conf
 	}
 
 	return cloned
+}
+
+func endpointConnectTimeout(endpointPreset contracts.EndpointPreset) time.Duration {
+	return time.Duration(endpointPreset.ConnectTimeoutMs) * time.Millisecond
 }
 
 type splitAuthorityCredentials struct {
