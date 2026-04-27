@@ -61,6 +61,8 @@ export const TERMINAL_STREAM_STATES = ['closed', 'cancelled', 'error'] as const
 
 export const SESSION_CONDITIONS = ['truncated'] as const
 export const RPC_TYPES = ['unary', 'server_stream', 'client_stream', 'bidi_stream'] as const
+export const CATALOG_SOURCES = ['reflection', 'proto'] as const
+export const PROTO_SOURCE_TYPES = ['directory', 'file'] as const
 export const TLS_MODES = ['plaintext', 'system_ca', 'custom_ca', 'mtls'] as const
 export const ENDPOINT_CHECK_STAGES = [
   'target_resolution',
@@ -79,9 +81,23 @@ export type StreamState = (typeof STREAM_STATES)[number]
 export type TerminalStreamState = (typeof TERMINAL_STREAM_STATES)[number]
 export type SessionCondition = (typeof SESSION_CONDITIONS)[number]
 export type RPCType = (typeof RPC_TYPES)[number]
+export type CatalogSourceKind = (typeof CATALOG_SOURCES)[number]
+export type ProtoSourceType = (typeof PROTO_SOURCE_TYPES)[number]
 export type TLSMode = (typeof TLS_MODES)[number]
 export type EndpointCheckStage = (typeof ENDPOINT_CHECK_STAGES)[number]
 export type EndpointCheckOutcome = (typeof ENDPOINT_CHECK_OUTCOMES)[number]
+export type JsonPrimitive = string | number | boolean | null
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
+
+export interface CallOptions {
+  requestTimeoutMs?: number
+  streamIdleTimeoutMs?: number
+}
+
+export interface StreamStatus {
+  code: string
+  message: string
+}
 
 export interface TransitionRule {
   from: StreamState
@@ -252,6 +268,17 @@ export interface CatalogLoadFromReflectionInput {
   endpoint: EndpointPreset
 }
 
+export interface ProtoSource {
+  type: ProtoSourceType
+  path: string
+}
+
+export interface CatalogLoadFromProtoSourcesInput {
+  endpoint: EndpointPreset
+  protoSources: ProtoSource[]
+  importPaths?: string[]
+}
+
 export interface CatalogMessageRef {
   name: string
   fullName: string
@@ -276,6 +303,7 @@ export interface ReflectionCatalogResult {
   endpoint: EndpointPreset
   services: CatalogService[]
   wellKnownTypes?: CatalogMessageRef[]
+  requestTemplates?: Record<string, JsonValue>
   diagnostic?: DiagnosticsUpdateEvent
   loadedAt: string
   durationMs: number
@@ -284,6 +312,134 @@ export interface ReflectionCatalogResult {
 export interface CatalogLoadFromReflectionResponse {
   ok: boolean
   data?: ReflectionCatalogResult
+  error?: ErrorEnvelope
+}
+
+export interface ProtoCatalogResult {
+  endpoint: EndpointPreset
+  protoSources: ProtoSource[]
+  importPaths?: string[]
+  services: CatalogService[]
+  wellKnownTypes?: CatalogMessageRef[]
+  requestTemplates?: Record<string, JsonValue>
+  diagnostic?: DiagnosticsUpdateEvent
+  loadedAt: string
+  durationMs: number
+}
+
+export interface CatalogLoadFromProtoSourcesResponse {
+  ok: boolean
+  data?: ProtoCatalogResult
+  error?: ErrorEnvelope
+}
+
+export interface CallInvokeUnaryInput {
+  catalogSource?: CatalogSourceKind
+  endpointId: string
+  method: string
+  environmentRef?: string
+  metadata?: Record<string, string>
+  body: JsonValue
+  callOptions?: CallOptions
+}
+
+export interface CallInvokeUnaryResult {
+  callId: string
+  sessionId: string
+  endpointId: string
+  method: string
+  rpcType: RPCType
+  finalState: StreamState
+  requestBody: JsonValue
+  responseBody?: JsonValue
+  headers?: Record<string, string[]>
+  trailers?: Record<string, string[]>
+  status: StreamStatus
+  diagnostic?: DiagnosticsUpdateEvent
+  startedAt: string
+  finishedAt: string
+  durationMs: number
+}
+
+export interface CallInvokeUnaryResponse {
+  ok: boolean
+  data?: CallInvokeUnaryResult
+  error?: ErrorEnvelope
+}
+
+export interface HistoryListInput {
+  limit?: number
+}
+
+export interface HistoryCallSummary {
+  callId: string
+  sessionId?: string
+  workspaceId?: string
+  method: string
+  rpcType: RPCType
+  endpointId: string
+  state: StreamState
+  grpcStatusCode?: string
+  startedAt: string
+  finishedAt?: string
+  durationMs?: number
+  requestCount: number
+  responseCount: number
+  truncated: boolean
+  errorCategory?: ErrorCategory
+  errorCode?: string
+  summaryPath?: string
+  sessionLogPath?: string
+}
+
+export interface HistoryListResult {
+  calls: HistoryCallSummary[]
+}
+
+export interface HistoryListResponse {
+  ok: boolean
+  data?: HistoryListResult
+  error?: ErrorEnvelope
+}
+
+export interface HistoryLogPreview {
+  json?: JsonValue
+}
+
+export interface HistoryLogGRPC {
+  method?: string
+  rpcType?: RPCType
+  statusCode?: string
+  metadata?: Record<string, string[]>
+}
+
+export interface HistoryLogEvent {
+  callId: string
+  sessionId?: string
+  seq: number
+  kind: string
+  direction?: string
+  messageIndex?: number
+  sizeBytes?: number
+  preview?: HistoryLogPreview
+  grpc?: HistoryLogGRPC
+  details?: Record<string, string>
+  ts: string
+}
+
+export interface HistoryGetResult {
+  summary: HistoryCallSummary
+  requestBody: JsonValue
+  responseBody?: JsonValue
+  headers?: Record<string, string[]>
+  trailers?: Record<string, string[]>
+  status: StreamStatus
+  events: HistoryLogEvent[]
+}
+
+export interface HistoryGetResponse {
+  ok: boolean
+  data?: HistoryGetResult
   error?: ErrorEnvelope
 }
 

@@ -3,9 +3,17 @@
 import {contracts} from '../models';
 import {appshell} from '../models';
 
+export function CallInvokeUnary(arg1:contracts.CallInvokeUnaryInput):Promise<contracts.CallInvokeUnaryResponse>;
+
+export function CatalogLoadFromProtoSources(arg1:contracts.CatalogLoadFromProtoSourcesInput):Promise<contracts.CatalogLoadFromProtoSourcesResponse>;
+
 export function CatalogLoadFromReflection(arg1:contracts.CatalogLoadFromReflectionInput):Promise<contracts.CatalogLoadFromReflectionResponse>;
 
 export function EndpointTest(arg1:contracts.EndpointTestInput):Promise<contracts.EndpointTestResponse>;
+
+export function HistoryGet(arg1:string):Promise<contracts.HistoryGetResponse>;
+
+export function HistoryList(arg1:contracts.HistoryListInput):Promise<contracts.HistoryListResponse>;
 
 export function ShellBootstrap():Promise<appshell.BootstrapResponse>;
 

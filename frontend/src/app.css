@@ -445,7 +445,8 @@ button {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   box-sizing: border-box;
   border-radius: 14px;
@@ -455,8 +456,90 @@ button {
   padding: 0.85rem 0.95rem;
 }
 
+.field textarea {
+  resize: vertical;
+  min-height: 140px;
+  font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+}
+
 .field--span-2 {
   grid-column: span 2;
+}
+
+.field--textarea {
+  gap: 10px;
+}
+
+.three-column {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.selectable-card {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.selected-method {
+  border-color: rgba(139, 232, 203, 0.34);
+  background: linear-gradient(180deg, rgba(57, 128, 109, 0.2), rgba(6, 12, 22, 0.8));
+}
+
+.inline-error {
+  color: var(--critical);
+  font-size: 0.9rem;
+}
+
+.info-banner {
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(139, 232, 203, 0.22);
+  background: rgba(139, 232, 203, 0.08);
+  color: var(--accent-strong);
+}
+
+.code-block {
+  margin: 0;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(6, 12, 22, 0.84);
+  border: 1px solid rgba(157, 187, 255, 0.09);
+  color: var(--text);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  font-size: 0.88rem;
+}
+
+.badge--warning {
+  background: rgba(255, 190, 106, 0.08);
+  border-color: rgba(255, 190, 106, 0.28);
+  color: var(--warning);
+}
+
+.history-list,
+.history-events {
+  display: grid;
+  gap: 10px;
+}
+
+.history-row,
+.history-event {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(157, 187, 255, 0.1);
+  background: rgba(6, 12, 22, 0.72);
+  color: var(--text);
+  text-align: left;
+}
+
+.selected-row {
+  border-color: rgba(139, 232, 203, 0.3);
 }
 
 .catalog-service,
@@ -509,7 +592,8 @@ button {
   }
 
   .grid-cards,
-  .two-column {
+  .two-column,
+  .three-column {
     grid-template-columns: 1fr;
   }
 

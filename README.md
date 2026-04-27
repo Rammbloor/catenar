@@ -8,6 +8,12 @@ Desktop-first gRPC GUI client foundations built with `Wails v2 + Go + Svelte 5 +
 - `Slice 0.2` complete: runtime/frontend contract manifest, invoke DTO types and module boundaries encoded in shared code.
 - `Slice 0.3` complete: shared stream state machine, navigation model and error taxonomy wired into backend and UI shell.
 
+## Epic 1 status
+
+- `Slice 1.1` complete: endpoint/TLS preflight and diagnostics classification for transport readiness.
+- `Slice 1.2` complete: reflection-driven service catalog loading with stable `reflection.*` diagnostics and well-known type surfacing.
+- `Slice 1.3` complete: reflection-selected unary request templates, end-to-end unary invoke, response panel data, SQLite-backed history summaries and JSONL session log artifacts.
+
 ## Local development
 
 1. Install frontend dependencies:

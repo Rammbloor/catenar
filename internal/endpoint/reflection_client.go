@@ -166,6 +166,7 @@ func buildReflectionCatalog(serviceNames []string, rawFiles map[string]*descript
 	}
 
 	services := make([]contracts.CatalogService, 0, len(serviceNames))
+	methodsByFullName := make(map[string]protoreflect.MethodDescriptor)
 	wellKnownRefs := map[string]contracts.CatalogMessageRef{}
 	for _, serviceName := range serviceNames {
 		descriptor, err := resolver.FindDescriptorByName(protoreflect.FullName(serviceName))
@@ -181,16 +182,9 @@ func buildReflectionCatalog(serviceNames []string, rawFiles map[string]*descript
 		methods := make([]contracts.CatalogMethod, 0, serviceDescriptor.Methods().Len())
 		for index := 0; index < serviceDescriptor.Methods().Len(); index++ {
 			methodDescriptor := serviceDescriptor.Methods().Get(index)
-			requestType := buildCatalogMessageRef(methodDescriptor.Input())
-			responseType := buildCatalogMessageRef(methodDescriptor.Output())
-
-			methods = append(methods, contracts.CatalogMethod{
-				Name:         string(methodDescriptor.Name()),
-				FullName:     string(methodDescriptor.FullName()),
-				RPCType:      rpcTypeForMethod(methodDescriptor),
-				RequestType:  requestType,
-				ResponseType: responseType,
-			})
+			catalogMethod := buildCatalogMethod(methodDescriptor)
+			methods = append(methods, catalogMethod)
+			methodsByFullName[catalogMethod.FullName] = methodDescriptor
 
 			collectWellKnownTypes(methodDescriptor.Input(), wellKnownRefs, map[protoreflect.FullName]struct{}{})
 			collectWellKnownTypes(methodDescriptor.Output(), wellKnownRefs, map[protoreflect.FullName]struct{}{})
@@ -222,6 +216,7 @@ func buildReflectionCatalog(serviceNames []string, rawFiles map[string]*descript
 	return ReflectionCatalog{
 		Services:       services,
 		WellKnownTypes: wellKnownTypes,
+		methods:        methodsByFullName,
 	}, nil
 }
 
@@ -316,6 +311,16 @@ func buildCatalogMessageRef(messageDescriptor protoreflect.MessageDescriptor) co
 		Name:        string(messageDescriptor.Name()),
 		FullName:    string(messageDescriptor.FullName()),
 		IsWellKnown: isWellKnownDescriptor(messageDescriptor.FullName()),
+	}
+}
+
+func buildCatalogMethod(methodDescriptor protoreflect.MethodDescriptor) contracts.CatalogMethod {
+	return contracts.CatalogMethod{
+		Name:         string(methodDescriptor.Name()),
+		FullName:     string(methodDescriptor.FullName()),
+		RPCType:      rpcTypeForMethod(methodDescriptor),
+		RequestType:  buildCatalogMessageRef(methodDescriptor.Input()),
+		ResponseType: buildCatalogMessageRef(methodDescriptor.Output()),
 	}
 }
 
@@ -432,6 +437,15 @@ func isReflectionUnavailableStatus(err error) bool {
 type chainedResolver struct {
 	primary  protodesc.Resolver
 	fallback protodesc.Resolver
+}
+
+func (c MethodCatalog) resolveMethodSelection(selectedMethod contracts.CatalogMethod) (protoreflect.MethodDescriptor, bool, bool) {
+	methodDescriptor, ok := c.methods[selectedMethod.FullName]
+	if !ok {
+		return nil, false, false
+	}
+
+	return methodDescriptor, true, buildCatalogMethod(methodDescriptor) == selectedMethod
 }
 
 func (r chainedResolver) FindFileByPath(path string) (protoreflect.FileDescriptor, error) {

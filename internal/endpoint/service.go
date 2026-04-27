@@ -2,14 +2,20 @@ package endpoint
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"tether/internal/contracts"
 )
@@ -85,15 +91,31 @@ type GRPCClientConn interface {
 
 type GRPCRuntime interface {
 	Dial(ctx context.Context, cfg EndpointRuntimeConfig) (GRPCClientConn, *endpointDiagnostic)
+	InvokeUnary(ctx context.Context, conn GRPCClientConn, request UnaryInvokeRequest) (UnaryInvokeResult, *endpointDiagnostic)
 }
 
-type ReflectionCatalog struct {
+type MethodCatalog struct {
 	Services       []contracts.CatalogService
 	WellKnownTypes []contracts.CatalogMessageRef
+	methods        map[string]protoreflect.MethodDescriptor
 }
 
+type ReflectionCatalog = MethodCatalog
+
 type ReflectionClient interface {
-	LoadCatalog(ctx context.Context, conn GRPCClientConn, endpointPreset contracts.EndpointPreset) (ReflectionCatalog, *endpointDiagnostic)
+	LoadCatalog(ctx context.Context, conn GRPCClientConn, endpointPreset contracts.EndpointPreset) (MethodCatalog, *endpointDiagnostic)
+}
+
+type ProtoLoader interface {
+	LoadCatalog(ctx context.Context, input ProtoLoaderInput) (MethodCatalog, *endpointDiagnostic)
+}
+
+type cachedMethodCatalog struct {
+	source           contracts.CatalogSourceKind
+	scope            WorkspaceContext
+	endpoint         contracts.EndpointPreset
+	catalog          MethodCatalog
+	requestTemplates map[string]any
 }
 
 type ServiceDependencies struct {
@@ -103,17 +125,26 @@ type ServiceDependencies struct {
 	TransportAdapter TransportAdapter
 	GRPCRuntime      GRPCRuntime
 	ReflectionClient ReflectionClient
+	ProtoLoader      ProtoLoader
+	HistoryStore     HistoryStore
+	EventLog         EventLog
 	Now              func() time.Time
 }
 
 type Service struct {
-	workspaceManager WorkspaceManager
-	secretStore      SecretStore
-	transportAdapter TransportAdapter
-	grpcRuntime      GRPCRuntime
-	reflectionClient ReflectionClient
-	emitter          EventEmitter
-	now              func() time.Time
+	workspaceManager  WorkspaceManager
+	secretStore       SecretStore
+	transportAdapter  TransportAdapter
+	grpcRuntime       GRPCRuntime
+	reflectionClient  ReflectionClient
+	protoLoader       ProtoLoader
+	historyStore      HistoryStore
+	eventLog          EventLog
+	emitter           EventEmitter
+	catalogCacheMu    sync.RWMutex
+	catalogCache      map[string]cachedMethodCatalog
+	initializationErr error
+	now               func() time.Time
 }
 
 func NewService(deps ServiceDependencies) *Service {
@@ -151,13 +182,40 @@ func NewService(deps ServiceDependencies) *Service {
 		reflectionClient = newServerReflectionClient()
 	}
 
+	protoLoader := deps.ProtoLoader
+	if protoLoader == nil {
+		protoLoader = newProtoLoader()
+	}
+
+	baseDir := appDataBaseDir(deps.AppDataDir)
+	historyStore := deps.HistoryStore
+	var initializationErr error
+	if historyStore == nil {
+		store, err := newSQLiteHistoryStore(baseDir)
+		if err != nil {
+			initializationErr = err
+		} else {
+			historyStore = store
+		}
+	}
+
+	eventLog := deps.EventLog
+	if eventLog == nil {
+		eventLog = newFileEventLog(baseDir)
+	}
+
 	return &Service{
-		workspaceManager: manager,
-		secretStore:      store,
-		transportAdapter: adapter,
-		grpcRuntime:      runtime,
-		reflectionClient: reflectionClient,
-		now:              now,
+		workspaceManager:  manager,
+		secretStore:       store,
+		transportAdapter:  adapter,
+		grpcRuntime:       runtime,
+		reflectionClient:  reflectionClient,
+		protoLoader:       protoLoader,
+		historyStore:      historyStore,
+		eventLog:          eventLog,
+		catalogCache:      make(map[string]cachedMethodCatalog),
+		initializationErr: initializationErr,
+		now:               now,
 	}
 }
 
@@ -333,18 +391,426 @@ func (s *Service) CatalogLoadFromReflection(ctx context.Context, input contracts
 		return failureCatalogResponse(reflectionDiagnostic)
 	}
 
+	requestTemplates := buildRequestTemplates(catalog)
+	s.storeMethodCatalog(endpointPreset.ID, contracts.CatalogSourceReflection, cachedMethodCatalog{
+		source:           contracts.CatalogSourceReflection,
+		scope:            scope,
+		endpoint:         endpointPreset,
+		catalog:          catalog,
+		requestTemplates: requestTemplates,
+	})
+
 	result := contracts.ReflectionCatalogResult{
-		Endpoint:       endpointPreset,
-		Services:       catalog.Services,
-		WellKnownTypes: catalog.WellKnownTypes,
-		Diagnostic:     event,
-		LoadedAt:       startedAt.Format(time.RFC3339Nano),
-		DurationMs:     time.Since(startedAt).Milliseconds(),
+		Endpoint:         endpointPreset,
+		Services:         catalog.Services,
+		WellKnownTypes:   catalog.WellKnownTypes,
+		RequestTemplates: requestTemplates,
+		Diagnostic:       event,
+		LoadedAt:         startedAt.Format(time.RFC3339Nano),
+		DurationMs:       time.Since(startedAt).Milliseconds(),
 	}
 
 	return contracts.CatalogLoadFromReflectionResponse{
 		Ok:   true,
 		Data: &result,
+	}
+}
+
+func (s *Service) CatalogLoadFromProtoSources(ctx context.Context, input contracts.CatalogLoadFromProtoSourcesInput) contracts.CatalogLoadFromProtoSourcesResponse {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	issues := ValidateEndpointPreset(input.Endpoint)
+	if len(issues) > 0 {
+		first := issues[0]
+		return contracts.CatalogLoadFromProtoSourcesResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     first.Code,
+				Category: contracts.ErrorCategoryValidation,
+				Message:  first.Message,
+				Details: map[string]string{
+					"field":      first.Field,
+					"issueCount": fmt.Sprintf("%d", len(issues)),
+				},
+			},
+		}
+	}
+
+	if len(input.ProtoSources) == 0 {
+		return contracts.CatalogLoadFromProtoSourcesResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "validation.proto_sources_required",
+				Category: contracts.ErrorCategoryValidation,
+				Message:  "Add at least one proto file or directory before loading the proto catalog.",
+			},
+		}
+	}
+
+	scope, endpointPreset, err := s.workspaceManager.PrepareEndpointTest(ctx, contracts.EndpointTestInput{Endpoint: input.Endpoint})
+	if err != nil {
+		return contracts.CatalogLoadFromProtoSourcesResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.workspace_context_unavailable",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The runtime could not prepare workspace context for the proto catalog load.",
+				Details: map[string]string{
+					"cause": err.Error(),
+				},
+			},
+		}
+	}
+
+	startedAt := s.now().UTC()
+	catalog, protoDiagnostic := s.protoLoader.LoadCatalog(ctx, ProtoLoaderInput{
+		ProtoSources: input.ProtoSources,
+		ImportPaths:  input.ImportPaths,
+	})
+	event := s.emitDiagnostic("catalog-proto", startedAt, protoDiagnostic)
+	if protoDiagnostic != nil && protoDiagnostic.Level == "error" {
+		return contracts.CatalogLoadFromProtoSourcesResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     protoDiagnostic.Code,
+				Category: protoDiagnostic.Category,
+				Message:  protoDiagnostic.Message,
+				Details:  copyDetails(protoDiagnostic.Details),
+			},
+		}
+	}
+
+	requestTemplates := buildRequestTemplates(catalog)
+	s.storeMethodCatalog(endpointPreset.ID, contracts.CatalogSourceProto, cachedMethodCatalog{
+		source:           contracts.CatalogSourceProto,
+		scope:            scope,
+		endpoint:         endpointPreset,
+		catalog:          catalog,
+		requestTemplates: requestTemplates,
+	})
+
+	return contracts.CatalogLoadFromProtoSourcesResponse{
+		Ok: true,
+		Data: &contracts.ProtoCatalogResult{
+			Endpoint:         endpointPreset,
+			ProtoSources:     append([]contracts.ProtoSource(nil), input.ProtoSources...),
+			ImportPaths:      append([]string(nil), input.ImportPaths...),
+			Services:         catalog.Services,
+			WellKnownTypes:   catalog.WellKnownTypes,
+			RequestTemplates: requestTemplates,
+			Diagnostic:       event,
+			LoadedAt:         startedAt.Format(time.RFC3339Nano),
+			DurationMs:       time.Since(startedAt).Milliseconds(),
+		},
+	}
+}
+
+func (s *Service) CallInvokeUnary(ctx context.Context, input contracts.CallInvokeUnaryInput) contracts.CallInvokeUnaryResponse {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if s.initializationErr != nil || s.historyStore == nil || s.eventLog == nil {
+		return contracts.CallInvokeUnaryResponse{
+			Ok:    false,
+			Error: wrapHistoryStoreError("initialize", s.initializationErr),
+		}
+	}
+
+	if strings.TrimSpace(input.EndpointID) == "" {
+		return contracts.CallInvokeUnaryResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "validation.endpoint_id_required",
+				Category: contracts.ErrorCategoryValidation,
+				Message:  "A loaded endpoint id is required before invoking a unary method.",
+			},
+		}
+	}
+
+	if strings.TrimSpace(input.Method) == "" {
+		return contracts.CallInvokeUnaryResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "validation.method_required",
+				Category: contracts.ErrorCategoryValidation,
+				Message:  "A method full name is required before invoking a unary call.",
+			},
+		}
+	}
+
+	catalogSource := normalizeCatalogSource(input.CatalogSource)
+	cachedCatalog, ok := s.loadMethodCatalog(input.EndpointID, catalogSource)
+	if !ok {
+		return contracts.CallInvokeUnaryResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     catalogSourceCode(catalogSource, "catalog_not_loaded"),
+				Category: catalogSourceErrorCategory(catalogSource),
+				Message:  fmt.Sprintf("Load the %s catalog for this endpoint again before invoking a unary method.", catalogSourceLabel(catalogSource)),
+				Details: map[string]string{
+					"endpointId": input.EndpointID,
+				},
+			},
+		}
+	}
+
+	methodDescriptor, found := cachedCatalog.catalog.methods[input.Method]
+	if !found {
+		return contracts.CallInvokeUnaryResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     catalogSourceCode(catalogSource, "method_not_found"),
+				Category: catalogSourceErrorCategory(catalogSource),
+				Message:  fmt.Sprintf("The selected method is no longer present in the cached %s catalog.", catalogSourceLabel(catalogSource)),
+				Details: map[string]string{
+					"endpointId": input.EndpointID,
+					"method":     input.Method,
+				},
+			},
+		}
+	}
+
+	selectedMethod := buildCatalogMethod(methodDescriptor)
+	if selectedMethod.RPCType != contracts.RPCTypeUnary {
+		return contracts.CallInvokeUnaryResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "validation.method_rpc_type_invalid",
+				Category: contracts.ErrorCategoryValidation,
+				Message:  fmt.Sprintf("The selected %s method is not unary and cannot be executed in the unary flow.", catalogSourceLabel(catalogSource)),
+				Details: map[string]string{
+					"method":  selectedMethod.FullName,
+					"rpcType": string(selectedMethod.RPCType),
+				},
+			},
+		}
+	}
+
+	runtimeCfg, prepDiagnostic := s.resolveRuntimeConfig(ctx, cachedCatalog.scope, cachedCatalog.endpoint)
+	if prepDiagnostic != nil {
+		s.emitDiagnostic("unary-invoke", s.now().UTC(), prepDiagnostic)
+		return contracts.CallInvokeUnaryResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(prepDiagnostic, "application.endpoint_preparation_failed", "The endpoint could not be prepared."),
+		}
+	}
+
+	startedAt := s.now().UTC()
+	conn, runtimeDiagnostic := s.grpcRuntime.Dial(ctx, runtimeCfg)
+	if runtimeDiagnostic != nil {
+		s.emitDiagnostic("unary-invoke", startedAt, runtimeDiagnostic)
+		return contracts.CallInvokeUnaryResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(runtimeDiagnostic, "transport.grpc_not_ready", "The endpoint could not establish a ready gRPC channel."),
+		}
+	}
+	defer func() {
+		_ = conn.Close()
+	}()
+
+	mergedMetadata := mergeInvokeMetadata(cachedCatalog.endpoint.MetadataDefaults, input.Metadata)
+	callID, sessionID := newCallIdentity(startedAt)
+	invokeResult, invokeDiagnostic := s.grpcRuntime.InvokeUnary(ctx, conn, UnaryInvokeRequest{
+		Method:         selectedMethod,
+		Descriptor:     methodDescriptor,
+		Metadata:       mergedMetadata,
+		Body:           input.Body,
+		RequestTimeout: resolveUnaryRequestTimeout(cachedCatalog.endpoint, input.CallOptions),
+	})
+
+	if invokeDiagnostic != nil && invokeDiagnostic.Category == contracts.ErrorCategoryValidation {
+		s.emitDiagnostic("unary-invoke", startedAt, invokeDiagnostic)
+		return contracts.CallInvokeUnaryResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(invokeDiagnostic, "validation.request_body_invalid", "The unary request body is invalid."),
+		}
+	}
+
+	finishedAt := startedAt.Add(invokeResult.Duration)
+	diagnosticEvent := s.emitDiagnostic("unary-invoke", startedAt, invokeDiagnostic)
+	finalState := contracts.StreamStateClosed
+	if invokeDiagnostic != nil {
+		finalState = contracts.StreamStateError
+	}
+
+	artifacts, artifactErr := s.eventLog.WriteUnaryCall(ctx, UnaryEventLogRecord{
+		CallID:          callID,
+		SessionID:       sessionID,
+		EndpointID:      cachedCatalog.endpoint.ID,
+		WorkspaceID:     cachedCatalog.scope.ID,
+		Method:          selectedMethod.FullName,
+		RPCType:         contracts.RPCTypeUnary,
+		FinalState:      finalState,
+		StartedAt:       startedAt,
+		FinishedAt:      finishedAt,
+		Duration:        invokeResult.Duration,
+		RequestBody:     input.Body,
+		ResponseBody:    invokeResult.ResponseBody,
+		RequestMetadata: mergedMetadata,
+		Headers:         invokeResult.Headers,
+		Trailers:        invokeResult.Trailers,
+		Status:          invokeResult.Status,
+		ErrorCategory:   invokeDiagnosticCategory(invokeDiagnostic),
+		ErrorCode:       invokeDiagnosticCode(invokeDiagnostic),
+	})
+	if artifactErr != nil {
+		return contracts.CallInvokeUnaryResponse{
+			Ok:    false,
+			Error: wrapHistoryStoreError("write_artifacts", artifactErr),
+		}
+	}
+
+	summary := contracts.HistoryCallSummary{
+		CallID:         callID,
+		SessionID:      sessionID,
+		WorkspaceID:    cachedCatalog.scope.ID,
+		Method:         selectedMethod.FullName,
+		RPCType:        contracts.RPCTypeUnary,
+		EndpointID:     cachedCatalog.endpoint.ID,
+		State:          finalState,
+		GRPCStatusCode: invokeResult.Status.Code,
+		StartedAt:      startedAt.Format(time.RFC3339Nano),
+		FinishedAt:     finishedAt.Format(time.RFC3339Nano),
+		DurationMs:     invokeResult.Duration.Milliseconds(),
+		RequestCount:   1,
+		ResponseCount:  boolToCount(invokeResult.ResponseBody != nil),
+		Truncated:      false,
+		ErrorCategory:  invokeDiagnosticCategory(invokeDiagnostic),
+		ErrorCode:      invokeDiagnosticCode(invokeDiagnostic),
+		SummaryPath:    artifacts.SummaryPath,
+		SessionLogPath: artifacts.SessionLogPath,
+	}
+
+	if err := s.historyStore.SaveCallSummary(ctx, summary); err != nil {
+		return contracts.CallInvokeUnaryResponse{
+			Ok:    false,
+			Error: wrapHistoryStoreError("save", err),
+		}
+	}
+
+	if invokeDiagnostic != nil && invokeDiagnostic.Category != contracts.ErrorCategoryGRPCStatus {
+		errorEnvelope := errorEnvelopeFromDiagnostic(invokeDiagnostic, "application.unary_invoke_failed", "The unary call could not be completed.")
+		if errorEnvelope.Details == nil {
+			errorEnvelope.Details = map[string]string{}
+		}
+		errorEnvelope.Details["callId"] = callID
+		return contracts.CallInvokeUnaryResponse{
+			Ok:    false,
+			Error: errorEnvelope,
+		}
+	}
+
+	return contracts.CallInvokeUnaryResponse{
+		Ok: true,
+		Data: &contracts.CallInvokeUnaryResult{
+			CallID:       callID,
+			SessionID:    sessionID,
+			EndpointID:   cachedCatalog.endpoint.ID,
+			Method:       selectedMethod.FullName,
+			RPCType:      contracts.RPCTypeUnary,
+			FinalState:   finalState,
+			RequestBody:  input.Body,
+			ResponseBody: invokeResult.ResponseBody,
+			Headers:      invokeResult.Headers,
+			Trailers:     invokeResult.Trailers,
+			Status:       invokeResult.Status,
+			Diagnostic:   diagnosticEvent,
+			StartedAt:    startedAt.Format(time.RFC3339Nano),
+			FinishedAt:   finishedAt.Format(time.RFC3339Nano),
+			DurationMs:   invokeResult.Duration.Milliseconds(),
+		},
+	}
+}
+
+func (s *Service) HistoryList(ctx context.Context, input contracts.HistoryListInput) contracts.HistoryListResponse {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if s.initializationErr != nil || s.historyStore == nil {
+		return contracts.HistoryListResponse{
+			Ok:    false,
+			Error: wrapHistoryStoreError("initialize", s.initializationErr),
+		}
+	}
+
+	calls, err := s.historyStore.ListCalls(ctx, input)
+	if err != nil {
+		return contracts.HistoryListResponse{
+			Ok:    false,
+			Error: wrapHistoryStoreError("list", err),
+		}
+	}
+
+	return contracts.HistoryListResponse{
+		Ok: true,
+		Data: &contracts.HistoryListResult{
+			Calls: calls,
+		},
+	}
+}
+
+func (s *Service) HistoryGet(ctx context.Context, callID string) contracts.HistoryGetResponse {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if s.initializationErr != nil || s.historyStore == nil {
+		return contracts.HistoryGetResponse{
+			Ok:    false,
+			Error: wrapHistoryStoreError("initialize", s.initializationErr),
+		}
+	}
+
+	if strings.TrimSpace(callID) == "" {
+		return contracts.HistoryGetResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "validation.call_id_required",
+				Category: contracts.ErrorCategoryValidation,
+				Message:  "A call id is required to load a persisted unary history entry.",
+			},
+		}
+	}
+
+	summary, err := s.historyStore.GetCallSummary(ctx, callID)
+	if err != nil {
+		return contracts.HistoryGetResponse{
+			Ok:    false,
+			Error: wrapHistoryStoreError("get", err),
+		}
+	}
+
+	detail, err := readStoredUnaryHistoryDetail(summary.SummaryPath)
+	if err != nil {
+		return contracts.HistoryGetResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.history_read_failed",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The runtime could not read the persisted unary history artifact.",
+				Details: map[string]string{
+					"callId": callID,
+					"cause":  err.Error(),
+				},
+			},
+		}
+	}
+
+	return contracts.HistoryGetResponse{
+		Ok: true,
+		Data: &contracts.HistoryGetResult{
+			Summary:      summary,
+			RequestBody:  detail.RequestBody,
+			ResponseBody: detail.ResponseBody,
+			Headers:      detail.Headers,
+			Trailers:     detail.Trailers,
+			Status:       detail.Status,
+			Events:       detail.Events,
+		},
 	}
 }
 
@@ -408,16 +874,38 @@ func (s *Service) emitDiagnostic(source string, ts time.Time, diagnostic *endpoi
 	return event
 }
 
-func materialIndexPath(appDataDir string) string {
-	base := appDataDir
-	if base == "" {
-		userConfigDir, err := os.UserConfigDir()
-		if err != nil {
-			base = filepath.Join(os.TempDir(), "tether")
-		} else {
-			base = filepath.Join(userConfigDir, "tether")
-		}
+func (s *Service) storeMethodCatalog(endpointID string, source contracts.CatalogSourceKind, snapshot cachedMethodCatalog) {
+	if endpointID == "" {
+		return
 	}
+
+	s.catalogCacheMu.Lock()
+	defer s.catalogCacheMu.Unlock()
+	s.catalogCache[catalogCacheKey(endpointID, source)] = snapshot
+}
+
+func (s *Service) loadMethodCatalog(endpointID string, source contracts.CatalogSourceKind) (cachedMethodCatalog, bool) {
+	s.catalogCacheMu.RLock()
+	defer s.catalogCacheMu.RUnlock()
+	snapshot, ok := s.catalogCache[catalogCacheKey(endpointID, source)]
+	return snapshot, ok
+}
+
+func appDataBaseDir(appDataDir string) string {
+	if strings.TrimSpace(appDataDir) != "" {
+		return appDataDir
+	}
+
+	userConfigDir, err := os.UserConfigDir()
+	if err != nil {
+		return filepath.Join(os.TempDir(), "tether")
+	}
+
+	return filepath.Join(userConfigDir, "tether")
+}
+
+func materialIndexPath(appDataDir string) string {
+	base := appDataBaseDir(appDataDir)
 
 	return filepath.Join(base, "materials", "index.json")
 }
@@ -588,5 +1076,113 @@ func (transientWorkspaceManager) PrepareEndpointTest(_ context.Context, input co
 	return WorkspaceContext{
 		ID:   "transient",
 		Kind: "editor-session",
-	}, normalizeEndpointPreset(input.Endpoint), nil
+	}, ensureEndpointIdentity(normalizeEndpointPreset(input.Endpoint)), nil
+}
+
+func ensureEndpointIdentity(endpointPreset contracts.EndpointPreset) contracts.EndpointPreset {
+	normalized := endpointPreset
+	if strings.TrimSpace(normalized.Name) == "" {
+		normalized.Name = normalized.Target
+	}
+	if strings.TrimSpace(normalized.ID) != "" {
+		return normalized
+	}
+
+	fingerprintSource := normalized
+	fingerprintSource.ID = ""
+	fingerprintSource.Name = ""
+	payload, err := json.Marshal(fingerprintSource)
+	if err != nil {
+		normalized.ID = fmt.Sprintf("ep_%d", time.Now().UnixNano())
+		return normalized
+	}
+
+	sum := sha256.Sum256(payload)
+	normalized.ID = "ep_" + hex.EncodeToString(sum[:6])
+	return normalized
+}
+
+func buildRequestTemplates(catalog MethodCatalog) map[string]any {
+	if len(catalog.methods) == 0 {
+		return nil
+	}
+
+	templates := make(map[string]any, len(catalog.methods))
+	for methodFullName, descriptor := range catalog.methods {
+		templates[methodFullName] = buildStarterJSONValue(descriptor.Input())
+	}
+
+	return templates
+}
+
+func catalogCacheKey(endpointID string, source contracts.CatalogSourceKind) string {
+	return endpointID + "::" + string(normalizeCatalogSource(source))
+}
+
+func normalizeCatalogSource(source contracts.CatalogSourceKind) contracts.CatalogSourceKind {
+	if source == contracts.CatalogSourceProto {
+		return source
+	}
+
+	return contracts.CatalogSourceReflection
+}
+
+func catalogSourceCode(source contracts.CatalogSourceKind, suffix string) string {
+	return string(normalizeCatalogSource(source)) + "." + suffix
+}
+
+func catalogSourceErrorCategory(source contracts.CatalogSourceKind) contracts.ErrorCategory {
+	if normalizeCatalogSource(source) == contracts.CatalogSourceProto {
+		return contracts.ErrorCategoryProto
+	}
+
+	return contracts.ErrorCategoryReflection
+}
+
+func catalogSourceLabel(source contracts.CatalogSourceKind) string {
+	if normalizeCatalogSource(source) == contracts.CatalogSourceProto {
+		return "proto-loaded"
+	}
+
+	return "reflection-loaded"
+}
+
+func newCallIdentity(startedAt time.Time) (string, string) {
+	nanos := startedAt.UnixNano()
+	return fmt.Sprintf("call_%d", nanos), fmt.Sprintf("sess_%d", nanos)
+}
+
+func invokeDiagnosticCategory(diagnostic *endpointDiagnostic) contracts.ErrorCategory {
+	if diagnostic == nil {
+		return ""
+	}
+	return diagnostic.Category
+}
+
+func invokeDiagnosticCode(diagnostic *endpointDiagnostic) string {
+	if diagnostic == nil {
+		return ""
+	}
+	return diagnostic.Code
+}
+
+func boolToCount(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func readStoredUnaryHistoryDetail(path string) (storedUnaryHistoryDetail, error) {
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return storedUnaryHistoryDetail{}, err
+	}
+
+	var detail storedUnaryHistoryDetail
+	if err := json.Unmarshal(payload, &detail); err != nil {
+		return storedUnaryHistoryDetail{}, err
+	}
+
+	return detail, nil
 }

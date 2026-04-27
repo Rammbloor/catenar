@@ -1,0 +1,307 @@
+package endpoint
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"tether/internal/contracts"
+)
+
+var secretMetadataKeys = map[string]struct{}{
+	"authorization":       {},
+	"proxy-authorization": {},
+	"x-api-key":           {},
+	"api-key":             {},
+	"token":               {},
+	"cookie":              {},
+	"set-cookie":          {},
+}
+
+type UnaryEventLogArtifacts struct {
+	SummaryPath    string
+	SessionLogPath string
+	Events         []contracts.HistoryLogEvent
+}
+
+type UnaryEventLogRecord struct {
+	CallID          string
+	SessionID       string
+	EndpointID      string
+	WorkspaceID     string
+	Method          string
+	RPCType         contracts.RPCType
+	FinalState      contracts.StreamState
+	StartedAt       time.Time
+	FinishedAt      time.Time
+	Duration        time.Duration
+	RequestBody     any
+	ResponseBody    any
+	RequestMetadata map[string]string
+	Headers         map[string][]string
+	Trailers        map[string][]string
+	Status          contracts.StreamStatus
+	ErrorCategory   contracts.ErrorCategory
+	ErrorCode       string
+}
+
+type storedUnaryHistoryDetail struct {
+	RequestBody  any                         `json:"requestBody"`
+	ResponseBody any                         `json:"responseBody,omitempty"`
+	Headers      map[string][]string         `json:"headers,omitempty"`
+	Trailers     map[string][]string         `json:"trailers,omitempty"`
+	Status       contracts.StreamStatus      `json:"status"`
+	Events       []contracts.HistoryLogEvent `json:"events"`
+}
+
+type EventLog interface {
+	WriteUnaryCall(ctx context.Context, record UnaryEventLogRecord) (UnaryEventLogArtifacts, error)
+}
+
+type fileEventLog struct {
+	baseDir string
+}
+
+func newFileEventLog(baseDir string) EventLog {
+	return &fileEventLog{baseDir: filepath.Join(baseDir, "history")}
+}
+
+func (l *fileEventLog) WriteUnaryCall(_ context.Context, record UnaryEventLogRecord) (UnaryEventLogArtifacts, error) {
+	if err := os.MkdirAll(filepath.Join(l.baseDir, "session-logs"), 0o755); err != nil {
+		return UnaryEventLogArtifacts{}, err
+	}
+	if err := os.MkdirAll(filepath.Join(l.baseDir, "summaries"), 0o755); err != nil {
+		return UnaryEventLogArtifacts{}, err
+	}
+
+	events := buildUnaryHistoryEvents(record)
+	sessionLogPath := filepath.Join(l.baseDir, "session-logs", record.CallID+".jsonl")
+	if err := writeHistoryEvents(sessionLogPath, events); err != nil {
+		return UnaryEventLogArtifacts{}, err
+	}
+
+	summaryPath := filepath.Join(l.baseDir, "summaries", record.CallID+".json")
+	summaryPayload := storedUnaryHistoryDetail{
+		RequestBody:  record.RequestBody,
+		ResponseBody: record.ResponseBody,
+		Headers:      copyMetadataValues(record.Headers),
+		Trailers:     copyMetadataValues(record.Trailers),
+		Status:       record.Status,
+		Events:       events,
+	}
+	if err := writeJSONFile(summaryPath, summaryPayload); err != nil {
+		return UnaryEventLogArtifacts{}, err
+	}
+
+	return UnaryEventLogArtifacts{
+		SummaryPath:    summaryPath,
+		SessionLogPath: sessionLogPath,
+		Events:         events,
+	}, nil
+}
+
+func buildUnaryHistoryEvents(record UnaryEventLogRecord) []contracts.HistoryLogEvent {
+	redactedRequestMetadata := redactMetadataMap(record.RequestMetadata)
+	redactedHeaders := redactMetadataValues(record.Headers)
+	redactedTrailers := redactMetadataValues(record.Trailers)
+
+	events := make([]contracts.HistoryLogEvent, 0, 6)
+	nextSequence := int64(1)
+	appendEvent := func(event contracts.HistoryLogEvent) {
+		event.CallID = record.CallID
+		event.SessionID = record.SessionID
+		event.Sequence = nextSequence
+		nextSequence++
+		events = append(events, event)
+	}
+
+	appendEvent(contracts.HistoryLogEvent{
+		Kind:      "call_started",
+		Direction: "sent",
+		Preview: &contracts.HistoryLogPreview{
+			JSON: record.RequestBody,
+		},
+		GRPC: &contracts.HistoryLogGRPC{
+			Method:   record.Method,
+			RPCType:  record.RPCType,
+			Metadata: toRepeatedMetadata(redactedRequestMetadata),
+		},
+		Timestamp: record.StartedAt.Format(time.RFC3339Nano),
+	})
+
+	appendEvent(contracts.HistoryLogEvent{
+		Kind:         "message_sent",
+		Direction:    "sent",
+		MessageIndex: 0,
+		SizeBytes:    measureJSONSize(record.RequestBody),
+		Preview: &contracts.HistoryLogPreview{
+			JSON: record.RequestBody,
+		},
+		Timestamp: record.StartedAt.Format(time.RFC3339Nano),
+	})
+
+	if len(redactedHeaders) > 0 {
+		appendEvent(contracts.HistoryLogEvent{
+			Kind:      "headers_received",
+			Direction: "received",
+			GRPC: &contracts.HistoryLogGRPC{
+				Metadata: redactedHeaders,
+			},
+			Timestamp: record.FinishedAt.Format(time.RFC3339Nano),
+		})
+	}
+
+	if record.ResponseBody != nil {
+		appendEvent(contracts.HistoryLogEvent{
+			Kind:         "message_received",
+			Direction:    "received",
+			MessageIndex: 0,
+			SizeBytes:    measureJSONSize(record.ResponseBody),
+			Preview: &contracts.HistoryLogPreview{
+				JSON: record.ResponseBody,
+			},
+			Timestamp: record.FinishedAt.Format(time.RFC3339Nano),
+		})
+	}
+
+	appendEvent(contracts.HistoryLogEvent{
+		Kind:      "trailers_received",
+		Direction: "received",
+		GRPC: &contracts.HistoryLogGRPC{
+			StatusCode: record.Status.Code,
+			Metadata:   redactedTrailers,
+		},
+		Timestamp: record.FinishedAt.Format(time.RFC3339Nano),
+	})
+
+	finalKind := "call_finished"
+	if record.FinalState == contracts.StreamStateError {
+		finalKind = "call_failed"
+	}
+
+	appendEvent(contracts.HistoryLogEvent{
+		Kind:      finalKind,
+		Direction: "received",
+		GRPC: &contracts.HistoryLogGRPC{
+			StatusCode: record.Status.Code,
+		},
+		Details: map[string]string{
+			"durationMs":    fmt.Sprintf("%d", record.Duration.Milliseconds()),
+			"finalState":    string(record.FinalState),
+			"errorCode":     record.ErrorCode,
+			"errorCategory": string(record.ErrorCategory),
+		},
+		Timestamp: record.FinishedAt.Format(time.RFC3339Nano),
+	})
+
+	return events
+}
+
+func writeHistoryEvents(path string, events []contracts.HistoryLogEvent) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	writer := bufio.NewWriter(file)
+	for _, event := range events {
+		payload, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+		if _, err := writer.Write(payload); err != nil {
+			return err
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			return err
+		}
+	}
+
+	return writer.Flush()
+}
+
+func writeJSONFile(path string, value any) error {
+	payload, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, payload, 0o600)
+}
+
+func measureJSONSize(value any) int64 {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return 0
+	}
+
+	return int64(len(payload))
+}
+
+func redactMetadataMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	redacted := make(map[string]string, len(values))
+	for key, value := range values {
+		if _, secret := secretMetadataKeys[strings.ToLower(strings.TrimSpace(key))]; secret {
+			redacted[key] = "[REDACTED]"
+			continue
+		}
+		redacted[key] = value
+	}
+
+	return redacted
+}
+
+func redactMetadataValues(values map[string][]string) map[string][]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	redacted := make(map[string][]string, len(values))
+	for key, items := range values {
+		if _, secret := secretMetadataKeys[strings.ToLower(strings.TrimSpace(key))]; secret {
+			redacted[key] = []string{"[REDACTED]"}
+			continue
+		}
+		redacted[key] = append([]string(nil), items...)
+	}
+
+	return redacted
+}
+
+func toRepeatedMetadata(values map[string]string) map[string][]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	result := make(map[string][]string, len(values))
+	for key, value := range values {
+		result[key] = []string{value}
+	}
+
+	return result
+}
+
+func copyMetadataValues(values map[string][]string) map[string][]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string][]string, len(values))
+	for key, items := range values {
+		cloned[key] = append([]string(nil), items...)
+	}
+
+	return cloned
+}

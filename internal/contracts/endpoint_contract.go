@@ -87,6 +87,24 @@ type CatalogLoadFromReflectionInput struct {
 	Endpoint EndpointPreset `json:"endpoint"`
 }
 
+type ProtoSourceType string
+
+const (
+	ProtoSourceTypeDirectory ProtoSourceType = "directory"
+	ProtoSourceTypeFile      ProtoSourceType = "file"
+)
+
+type ProtoSource struct {
+	Type ProtoSourceType `json:"type"`
+	Path string          `json:"path"`
+}
+
+type CatalogLoadFromProtoSourcesInput struct {
+	Endpoint     EndpointPreset `json:"endpoint"`
+	ProtoSources []ProtoSource  `json:"protoSources"`
+	ImportPaths  []string       `json:"importPaths,omitempty"`
+}
+
 type CatalogMessageRef struct {
 	Name        string `json:"name"`
 	FullName    string `json:"fullName"`
@@ -108,16 +126,135 @@ type CatalogService struct {
 }
 
 type ReflectionCatalogResult struct {
-	Endpoint       EndpointPreset          `json:"endpoint"`
-	Services       []CatalogService        `json:"services"`
-	WellKnownTypes []CatalogMessageRef     `json:"wellKnownTypes,omitempty"`
-	Diagnostic     *DiagnosticsUpdateEvent `json:"diagnostic,omitempty"`
-	LoadedAt       string                  `json:"loadedAt"`
-	DurationMs     int64                   `json:"durationMs"`
+	Endpoint         EndpointPreset          `json:"endpoint"`
+	Services         []CatalogService        `json:"services"`
+	WellKnownTypes   []CatalogMessageRef     `json:"wellKnownTypes,omitempty"`
+	RequestTemplates map[string]any          `json:"requestTemplates,omitempty"`
+	Diagnostic       *DiagnosticsUpdateEvent `json:"diagnostic,omitempty"`
+	LoadedAt         string                  `json:"loadedAt"`
+	DurationMs       int64                   `json:"durationMs"`
 }
 
 type CatalogLoadFromReflectionResponse struct {
 	Ok    bool                     `json:"ok"`
 	Data  *ReflectionCatalogResult `json:"data,omitempty"`
 	Error *ErrorEnvelope           `json:"error,omitempty"`
+}
+
+type ProtoCatalogResult struct {
+	Endpoint         EndpointPreset          `json:"endpoint"`
+	ProtoSources     []ProtoSource           `json:"protoSources"`
+	ImportPaths      []string                `json:"importPaths,omitempty"`
+	Services         []CatalogService        `json:"services"`
+	WellKnownTypes   []CatalogMessageRef     `json:"wellKnownTypes,omitempty"`
+	RequestTemplates map[string]any          `json:"requestTemplates,omitempty"`
+	Diagnostic       *DiagnosticsUpdateEvent `json:"diagnostic,omitempty"`
+	LoadedAt         string                  `json:"loadedAt"`
+	DurationMs       int64                   `json:"durationMs"`
+}
+
+type CatalogLoadFromProtoSourcesResponse struct {
+	Ok    bool                `json:"ok"`
+	Data  *ProtoCatalogResult `json:"data,omitempty"`
+	Error *ErrorEnvelope      `json:"error,omitempty"`
+}
+
+type CallInvokeUnaryResult struct {
+	CallID       string                  `json:"callId"`
+	SessionID    string                  `json:"sessionId"`
+	EndpointID   string                  `json:"endpointId"`
+	Method       string                  `json:"method"`
+	RPCType      RPCType                 `json:"rpcType"`
+	FinalState   StreamState             `json:"finalState"`
+	RequestBody  any                     `json:"requestBody"`
+	ResponseBody any                     `json:"responseBody,omitempty"`
+	Headers      map[string][]string     `json:"headers,omitempty"`
+	Trailers     map[string][]string     `json:"trailers,omitempty"`
+	Status       StreamStatus            `json:"status"`
+	Diagnostic   *DiagnosticsUpdateEvent `json:"diagnostic,omitempty"`
+	StartedAt    string                  `json:"startedAt"`
+	FinishedAt   string                  `json:"finishedAt"`
+	DurationMs   int64                   `json:"durationMs"`
+}
+
+type CallInvokeUnaryResponse struct {
+	Ok    bool                   `json:"ok"`
+	Data  *CallInvokeUnaryResult `json:"data,omitempty"`
+	Error *ErrorEnvelope         `json:"error,omitempty"`
+}
+
+type HistoryListInput struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+type HistoryCallSummary struct {
+	CallID         string        `json:"callId"`
+	SessionID      string        `json:"sessionId,omitempty"`
+	WorkspaceID    string        `json:"workspaceId,omitempty"`
+	Method         string        `json:"method"`
+	RPCType        RPCType       `json:"rpcType"`
+	EndpointID     string        `json:"endpointId"`
+	State          StreamState   `json:"state"`
+	GRPCStatusCode string        `json:"grpcStatusCode,omitempty"`
+	StartedAt      string        `json:"startedAt"`
+	FinishedAt     string        `json:"finishedAt,omitempty"`
+	DurationMs     int64         `json:"durationMs,omitempty"`
+	RequestCount   int           `json:"requestCount"`
+	ResponseCount  int           `json:"responseCount"`
+	Truncated      bool          `json:"truncated"`
+	ErrorCategory  ErrorCategory `json:"errorCategory,omitempty"`
+	ErrorCode      string        `json:"errorCode,omitempty"`
+	SummaryPath    string        `json:"summaryPath,omitempty"`
+	SessionLogPath string        `json:"sessionLogPath,omitempty"`
+}
+
+type HistoryListResult struct {
+	Calls []HistoryCallSummary `json:"calls"`
+}
+
+type HistoryListResponse struct {
+	Ok    bool               `json:"ok"`
+	Data  *HistoryListResult `json:"data,omitempty"`
+	Error *ErrorEnvelope     `json:"error,omitempty"`
+}
+
+type HistoryLogPreview struct {
+	JSON any `json:"json,omitempty"`
+}
+
+type HistoryLogGRPC struct {
+	Method     string              `json:"method,omitempty"`
+	RPCType    RPCType             `json:"rpcType,omitempty"`
+	StatusCode string              `json:"statusCode,omitempty"`
+	Metadata   map[string][]string `json:"metadata,omitempty"`
+}
+
+type HistoryLogEvent struct {
+	CallID       string             `json:"callId"`
+	SessionID    string             `json:"sessionId,omitempty"`
+	Sequence     int64              `json:"seq"`
+	Kind         string             `json:"kind"`
+	Direction    string             `json:"direction,omitempty"`
+	MessageIndex int                `json:"messageIndex,omitempty"`
+	SizeBytes    int64              `json:"sizeBytes,omitempty"`
+	Preview      *HistoryLogPreview `json:"preview,omitempty"`
+	GRPC         *HistoryLogGRPC    `json:"grpc,omitempty"`
+	Details      map[string]string  `json:"details,omitempty"`
+	Timestamp    string             `json:"ts"`
+}
+
+type HistoryGetResult struct {
+	Summary      HistoryCallSummary  `json:"summary"`
+	RequestBody  any                 `json:"requestBody"`
+	ResponseBody any                 `json:"responseBody,omitempty"`
+	Headers      map[string][]string `json:"headers,omitempty"`
+	Trailers     map[string][]string `json:"trailers,omitempty"`
+	Status       StreamStatus        `json:"status"`
+	Events       []HistoryLogEvent   `json:"events"`
+}
+
+type HistoryGetResponse struct {
+	Ok    bool              `json:"ok"`
+	Data  *HistoryGetResult `json:"data,omitempty"`
+	Error *ErrorEnvelope    `json:"error,omitempty"`
 }

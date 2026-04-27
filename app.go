@@ -81,6 +81,82 @@ func (a *App) CatalogLoadFromReflection(input contracts.CatalogLoadFromReflectio
 	return a.endpoint.CatalogLoadFromReflection(a.ctx, input)
 }
 
+// CatalogLoadFromProtoSources loads a service and method catalog from local proto sources and import paths.
+func (a *App) CatalogLoadFromProtoSources(input contracts.CatalogLoadFromProtoSourcesInput) contracts.CatalogLoadFromProtoSourcesResponse {
+	if a.ctx == nil {
+		return contracts.CatalogLoadFromProtoSourcesResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.runtime_not_ready",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The Wails runtime context is not ready yet.",
+				Details: map[string]string{
+					"expectedHook": "startup",
+				},
+			},
+		}
+	}
+
+	return a.endpoint.CatalogLoadFromProtoSources(a.ctx, input)
+}
+
+// CallInvokeUnary executes a unary RPC using the cached method catalog for the selected endpoint.
+func (a *App) CallInvokeUnary(input contracts.CallInvokeUnaryInput) contracts.CallInvokeUnaryResponse {
+	if a.ctx == nil {
+		return contracts.CallInvokeUnaryResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.runtime_not_ready",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The Wails runtime context is not ready yet.",
+				Details: map[string]string{
+					"expectedHook": "startup",
+				},
+			},
+		}
+	}
+
+	return a.endpoint.CallInvokeUnary(a.ctx, input)
+}
+
+// HistoryList returns recent persisted unary call summaries from the local history store.
+func (a *App) HistoryList(input contracts.HistoryListInput) contracts.HistoryListResponse {
+	if a.ctx == nil {
+		return contracts.HistoryListResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.runtime_not_ready",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The Wails runtime context is not ready yet.",
+				Details: map[string]string{
+					"expectedHook": "startup",
+				},
+			},
+		}
+	}
+
+	return a.endpoint.HistoryList(a.ctx, input)
+}
+
+// HistoryGet returns one persisted unary history entry together with its stored session artifact.
+func (a *App) HistoryGet(callID string) contracts.HistoryGetResponse {
+	if a.ctx == nil {
+		return contracts.HistoryGetResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.runtime_not_ready",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The Wails runtime context is not ready yet.",
+				Details: map[string]string{
+					"expectedHook": "startup",
+				},
+			},
+		}
+	}
+
+	return a.endpoint.HistoryGet(a.ctx, callID)
+}
+
 type wailsEmitter struct {
 	ctx context.Context
 }

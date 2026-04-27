@@ -90,6 +90,13 @@ const (
 	RPCTypeBidiStream   RPCType = "bidi_stream"
 )
 
+type CatalogSourceKind string
+
+const (
+	CatalogSourceReflection CatalogSourceKind = "reflection"
+	CatalogSourceProto      CatalogSourceKind = "proto"
+)
+
 type RequestMode string
 
 const (
@@ -114,7 +121,7 @@ type StreamStateEvent struct {
 }
 
 type StreamEventPreview struct {
-	JSON map[string]any `json:"json,omitempty"`
+	JSON any `json:"json,omitempty"`
 }
 
 type StreamEventPayload struct {
@@ -171,7 +178,7 @@ type CallOptions struct {
 }
 
 type StreamMessage struct {
-	Body map[string]any `json:"body"`
+	Body any `json:"body"`
 }
 
 type StreamRequestSpec struct {
@@ -180,11 +187,12 @@ type StreamRequestSpec struct {
 }
 
 type CallInvokeUnaryInput struct {
+	CatalogSource  CatalogSourceKind `json:"catalogSource,omitempty"`
 	EndpointID     string            `json:"endpointId"`
 	Method         string            `json:"method"`
 	EnvironmentRef string            `json:"environmentRef,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
-	Body           map[string]any    `json:"body"`
+	Body           any               `json:"body"`
 	CallOptions    CallOptions       `json:"callOptions,omitempty"`
 }
 

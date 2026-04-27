@@ -7,10 +7,13 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	grpccredentials "google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	v1reflectiongrpc "google.golang.org/grpc/reflection/grpc_reflection_v1"
 	v1alphareflectiongrpc "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -220,6 +223,17 @@ var reflectionDemoServiceDesc = grpc.ServiceDesc{
 			Handler: func(_ any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
 				request := &timestamppb.Timestamp{}
 				if err := dec(request); err != nil {
+					return nil, err
+				}
+
+				if request.Seconds < 0 {
+					return nil, status.Error(codes.InvalidArgument, "timestamp seconds must be non-negative")
+				}
+
+				if err := grpc.SetHeader(ctx, metadata.Pairs("x-reflection-demo", "ping")); err != nil {
+					return nil, err
+				}
+				if err := grpc.SetTrailer(ctx, metadata.Pairs("x-reflection-demo-trailer", "ok")); err != nil {
 					return nil, err
 				}
 
