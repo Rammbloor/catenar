@@ -547,11 +547,12 @@ func (s *Service) CallInvokeUnary(ctx context.Context, input contracts.CallInvok
 		return contracts.CallInvokeUnaryResponse{
 			Ok: false,
 			Error: &contracts.ErrorEnvelope{
-				Code:     catalogSourceCode(catalogSource, "catalog_not_loaded"),
-				Category: catalogSourceErrorCategory(catalogSource),
+				Code:     catalogCacheStateCode("catalog_not_loaded"),
+				Category: contracts.ErrorCategoryApplication,
 				Message:  fmt.Sprintf("Load the %s catalog for this endpoint again before invoking a unary method.", catalogSourceLabel(catalogSource)),
 				Details: map[string]string{
-					"endpointId": input.EndpointID,
+					"endpointId":    input.EndpointID,
+					"catalogSource": string(catalogSource),
 				},
 			},
 		}
@@ -562,12 +563,13 @@ func (s *Service) CallInvokeUnary(ctx context.Context, input contracts.CallInvok
 		return contracts.CallInvokeUnaryResponse{
 			Ok: false,
 			Error: &contracts.ErrorEnvelope{
-				Code:     catalogSourceCode(catalogSource, "method_not_found"),
-				Category: catalogSourceErrorCategory(catalogSource),
+				Code:     catalogCacheStateCode("method_not_found"),
+				Category: contracts.ErrorCategoryApplication,
 				Message:  fmt.Sprintf("The selected method is no longer present in the cached %s catalog.", catalogSourceLabel(catalogSource)),
 				Details: map[string]string{
-					"endpointId": input.EndpointID,
-					"method":     input.Method,
+					"endpointId":    input.EndpointID,
+					"method":        input.Method,
+					"catalogSource": string(catalogSource),
 				},
 			},
 		}
@@ -1102,6 +1104,10 @@ func ensureEndpointIdentity(endpointPreset contracts.EndpointPreset) contracts.E
 	return normalized
 }
 
+func EnsureEndpointIdentity(endpointPreset contracts.EndpointPreset) contracts.EndpointPreset {
+	return ensureEndpointIdentity(endpointPreset)
+}
+
 func buildRequestTemplates(catalog MethodCatalog) map[string]any {
 	if len(catalog.methods) == 0 {
 		return nil
@@ -1127,16 +1133,8 @@ func normalizeCatalogSource(source contracts.CatalogSourceKind) contracts.Catalo
 	return contracts.CatalogSourceReflection
 }
 
-func catalogSourceCode(source contracts.CatalogSourceKind, suffix string) string {
-	return string(normalizeCatalogSource(source)) + "." + suffix
-}
-
-func catalogSourceErrorCategory(source contracts.CatalogSourceKind) contracts.ErrorCategory {
-	if normalizeCatalogSource(source) == contracts.CatalogSourceProto {
-		return contracts.ErrorCategoryProto
-	}
-
-	return contracts.ErrorCategoryReflection
+func catalogCacheStateCode(suffix string) string {
+	return "application." + suffix
 }
 
 func catalogSourceLabel(source contracts.CatalogSourceKind) string {
@@ -1184,5 +1182,14 @@ func readStoredUnaryHistoryDetail(path string) (storedUnaryHistoryDetail, error)
 		return storedUnaryHistoryDetail{}, err
 	}
 
-	return detail, nil
+	sanitized := detail
+	sanitized.Headers = redactMetadataValues(detail.Headers)
+	sanitized.Trailers = redactMetadataValues(detail.Trailers)
+	if !metadataValuesEqual(detail.Headers, sanitized.Headers) || !metadataValuesEqual(detail.Trailers, sanitized.Trailers) {
+		if err := writeJSONFile(path, sanitized); err != nil {
+			return storedUnaryHistoryDetail{}, err
+		}
+	}
+
+	return sanitized, nil
 }

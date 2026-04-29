@@ -89,8 +89,8 @@ func (l *fileEventLog) WriteUnaryCall(_ context.Context, record UnaryEventLogRec
 	summaryPayload := storedUnaryHistoryDetail{
 		RequestBody:  record.RequestBody,
 		ResponseBody: record.ResponseBody,
-		Headers:      copyMetadataValues(record.Headers),
-		Trailers:     copyMetadataValues(record.Trailers),
+		Headers:      redactMetadataValues(record.Headers),
+		Trailers:     redactMetadataValues(record.Trailers),
 		Status:       record.Status,
 		Events:       events,
 	}
@@ -280,6 +280,26 @@ func redactMetadataValues(values map[string][]string) map[string][]string {
 	return redacted
 }
 
+func metadataValuesEqual(left map[string][]string, right map[string][]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+
+	for key, leftItems := range left {
+		rightItems, ok := right[key]
+		if !ok || len(leftItems) != len(rightItems) {
+			return false
+		}
+		for index := range leftItems {
+			if leftItems[index] != rightItems[index] {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
 func toRepeatedMetadata(values map[string]string) map[string][]string {
 	if len(values) == 0 {
 		return nil
@@ -291,17 +311,4 @@ func toRepeatedMetadata(values map[string]string) map[string][]string {
 	}
 
 	return result
-}
-
-func copyMetadataValues(values map[string][]string) map[string][]string {
-	if len(values) == 0 {
-		return nil
-	}
-
-	cloned := make(map[string][]string, len(values))
-	for key, items := range values {
-		cloned[key] = append([]string(nil), items...)
-	}
-
-	return cloned
 }

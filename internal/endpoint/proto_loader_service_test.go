@@ -64,6 +64,48 @@ func TestCatalogLoadFromProtoSourcesSupportsMultiDirectoryImportsAndBuildsReques
 	}
 }
 
+func TestCatalogLoadFromProtoSourcesPrefersSelectedSourceRootsOverImportPaths(t *testing.T) {
+	t.Parallel()
+
+	serviceRoot, importRoot := writeOverlappingProtoCatalogFixture(t)
+	service := NewService(ServiceDependencies{})
+
+	response := service.CatalogLoadFromProtoSources(context.Background(), contracts.CatalogLoadFromProtoSourcesInput{
+		Endpoint: contracts.EndpointPreset{
+			Target:              "127.0.0.1:50051",
+			TLS:                 contracts.EndpointTLSSettings{Mode: contracts.TLSModePlaintext},
+			ConnectTimeoutMs:    3000,
+			RequestTimeoutMs:    1000,
+			StreamIdleTimeoutMs: 0,
+		},
+		ProtoSources: []contracts.ProtoSource{
+			{Type: contracts.ProtoSourceTypeDirectory, Path: serviceRoot},
+		},
+		ImportPaths: []string{importRoot},
+	})
+
+	if !response.Ok || response.Data == nil {
+		t.Fatalf("expected proto catalog, got %+v", response.Error)
+	}
+
+	template, ok := response.Data.RequestTemplates["tether.demo.v1.ReflectionDemo.UseSource"]
+	if !ok {
+		t.Fatalf("expected request template for imported source-backed method")
+	}
+
+	templateBody, ok := template.(map[string]any)
+	if !ok {
+		t.Fatalf("expected object request template, got %T", template)
+	}
+
+	if _, ok := templateBody["preferredSource"]; !ok {
+		t.Fatalf("expected source-root descriptor fields to win, got %+v", templateBody)
+	}
+	if _, ok := templateBody["wrongImportRoot"]; ok {
+		t.Fatalf("expected conflicting import-root descriptor to be ignored, got %+v", templateBody)
+	}
+}
+
 func TestCallInvokeUnaryUsesCachedProtoCatalogWithoutReflectionAndPersistsHistory(t *testing.T) {
 	t.Parallel()
 
@@ -231,6 +273,57 @@ package tether.demo.shared.v1;
 
 message ImportedMarker {
   string label = 1;
+}
+`,
+	)
+
+	return serviceRoot, importRoot
+}
+
+func writeOverlappingProtoCatalogFixture(t *testing.T) (string, string) {
+	t.Helper()
+
+	serviceRoot := filepath.Join(t.TempDir(), "proto-service")
+	importRoot := filepath.Join(t.TempDir(), "proto-imports")
+
+	writeProtoFile(
+		t,
+		serviceRoot,
+		filepath.Join("demo", "v1", "reflection_demo.proto"),
+		`syntax = "proto3";
+package tether.demo.v1;
+
+import "google/protobuf/empty.proto";
+import "shared/v1/request.proto";
+
+service ReflectionDemo {
+  rpc UseSource(tether.demo.shared.v1.SourceRequest) returns (google.protobuf.Empty);
+}
+`,
+	)
+
+	writeProtoFile(
+		t,
+		serviceRoot,
+		filepath.Join("shared", "v1", "request.proto"),
+		`syntax = "proto3";
+package tether.demo.shared.v1;
+
+message SourceRequest {
+  string preferred_source = 1;
+}
+`,
+	)
+
+	writeProtoFile(
+		t,
+		importRoot,
+		filepath.Join("shared", "v1", "request.proto"),
+		`syntax = "proto3";
+package tether.demo.shared.v1;
+
+message SourceRequest {
+  int32 wrong_import_root = 1;
 }
 `,
 	)

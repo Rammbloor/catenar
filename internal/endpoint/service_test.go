@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -320,6 +321,222 @@ func TestEndpointTestTLSHostnameMismatchProducesTransportDiagnostic(t *testing.T
 
 	if response.Data.Diagnostic == nil || response.Data.Diagnostic.Code != "transport.tls_hostname_mismatch" {
 		t.Fatalf("expected hostname mismatch diagnostic, got %+v", response.Data.Diagnostic)
+	}
+}
+
+func TestCallInvokeUnaryClassifiesCatalogNotLoadedAsApplicationStateError(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(ServiceDependencies{
+		AppDataDir: t.TempDir(),
+	})
+
+	testCases := []struct {
+		name          string
+		catalogSource contracts.CatalogSourceKind
+	}{
+		{name: "reflection", catalogSource: contracts.CatalogSourceReflection},
+		{name: "proto", catalogSource: contracts.CatalogSourceProto},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			response := service.CallInvokeUnary(context.Background(), contracts.CallInvokeUnaryInput{
+				CatalogSource: tc.catalogSource,
+				EndpointID:    "ep-missing",
+				Method:        "tether.demo.v1.ReflectionDemo.Ping",
+				Body:          map[string]any{},
+			})
+
+			if response.Ok {
+				t.Fatalf("expected unary invoke to fail without a cached catalog")
+			}
+			if response.Error == nil {
+				t.Fatalf("expected error envelope")
+			}
+			if response.Error.Code != "application.catalog_not_loaded" {
+				t.Fatalf("expected application.catalog_not_loaded, got %+v", response.Error)
+			}
+			if response.Error.Category != contracts.ErrorCategoryApplication {
+				t.Fatalf("expected application category, got %+v", response.Error)
+			}
+			if response.Error.Details["endpointId"] != "ep-missing" {
+				t.Fatalf("expected endpoint details, got %+v", response.Error.Details)
+			}
+			if response.Error.Details["catalogSource"] != string(tc.catalogSource) {
+				t.Fatalf("expected catalog source details, got %+v", response.Error.Details)
+			}
+		})
+	}
+}
+
+func TestCallInvokeUnaryClassifiesCachedMethodMissesAsApplicationStateError(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name          string
+		catalogSource contracts.CatalogSourceKind
+		loadEndpoint  func(*testing.T, *Service) string
+	}{
+		{
+			name:          "reflection",
+			catalogSource: contracts.CatalogSourceReflection,
+			loadEndpoint: func(t *testing.T, service *Service) string {
+				t.Helper()
+
+				address, stop := startReflectionCatalogServer(t, reflectionCatalogServerOptions{})
+				t.Cleanup(stop)
+
+				response := service.CatalogLoadFromReflection(context.Background(), contracts.CatalogLoadFromReflectionInput{
+					Endpoint: contracts.EndpointPreset{
+						Target:              address,
+						TLS:                 contracts.EndpointTLSSettings{Mode: contracts.TLSModePlaintext},
+						ConnectTimeoutMs:    3000,
+						RequestTimeoutMs:    1000,
+						StreamIdleTimeoutMs: 0,
+					},
+				})
+				if !response.Ok || response.Data == nil {
+					t.Fatalf("expected reflection catalog, got %+v", response.Error)
+				}
+
+				return response.Data.Endpoint.ID
+			},
+		},
+		{
+			name:          "proto",
+			catalogSource: contracts.CatalogSourceProto,
+			loadEndpoint: func(t *testing.T, service *Service) string {
+				t.Helper()
+
+				serviceRoot, importRoot := writeProtoCatalogFixture(t)
+				response := service.CatalogLoadFromProtoSources(context.Background(), contracts.CatalogLoadFromProtoSourcesInput{
+					Endpoint: contracts.EndpointPreset{
+						Target:              "127.0.0.1:50051",
+						TLS:                 contracts.EndpointTLSSettings{Mode: contracts.TLSModePlaintext},
+						ConnectTimeoutMs:    3000,
+						RequestTimeoutMs:    1000,
+						StreamIdleTimeoutMs: 0,
+					},
+					ProtoSources: []contracts.ProtoSource{
+						{Type: contracts.ProtoSourceTypeDirectory, Path: serviceRoot},
+					},
+					ImportPaths: []string{importRoot},
+				})
+				if !response.Ok || response.Data == nil {
+					t.Fatalf("expected proto catalog, got %+v", response.Error)
+				}
+
+				return response.Data.Endpoint.ID
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			service := NewService(ServiceDependencies{
+				AppDataDir: t.TempDir(),
+			})
+			endpointID := tc.loadEndpoint(t, service)
+
+			response := service.CallInvokeUnary(context.Background(), contracts.CallInvokeUnaryInput{
+				CatalogSource: tc.catalogSource,
+				EndpointID:    endpointID,
+				Method:        "tether.demo.v1.ReflectionDemo.Missing",
+				Body:          map[string]any{},
+			})
+
+			if response.Ok {
+				t.Fatalf("expected unary invoke to fail for a stale cached method")
+			}
+			if response.Error == nil {
+				t.Fatalf("expected error envelope")
+			}
+			if response.Error.Code != "application.method_not_found" {
+				t.Fatalf("expected application.method_not_found, got %+v", response.Error)
+			}
+			if response.Error.Category != contracts.ErrorCategoryApplication {
+				t.Fatalf("expected application category, got %+v", response.Error)
+			}
+			if response.Error.Details["endpointId"] != endpointID {
+				t.Fatalf("expected endpoint details, got %+v", response.Error.Details)
+			}
+			if response.Error.Details["method"] != "tether.demo.v1.ReflectionDemo.Missing" {
+				t.Fatalf("expected missing method details, got %+v", response.Error.Details)
+			}
+			if response.Error.Details["catalogSource"] != string(tc.catalogSource) {
+				t.Fatalf("expected catalog source details, got %+v", response.Error.Details)
+			}
+		})
+	}
+}
+
+func TestHistoryGetRedactsAndRewritesLegacySummaryMetadata(t *testing.T) {
+	t.Parallel()
+
+	appDataDir := t.TempDir()
+	service := NewService(ServiceDependencies{
+		AppDataDir: appDataDir,
+	})
+
+	summaryPath := filepath.Join(appDataDir, "history", "summaries", "legacy-call.json")
+	if err := os.MkdirAll(filepath.Dir(summaryPath), 0o755); err != nil {
+		t.Fatalf("mkdir summary dir: %v", err)
+	}
+
+	if err := writeJSONFile(summaryPath, storedUnaryHistoryDetail{
+		RequestBody: map[string]any{"ping": "pong"},
+		Headers: map[string][]string{
+			"set-cookie": {"legacy-session-secret"},
+		},
+		Trailers: map[string][]string{
+			"set-cookie": {"legacy-refresh-secret"},
+		},
+		Status: contracts.StreamStatus{
+			Code: "OK",
+		},
+		Events: []contracts.HistoryLogEvent{},
+	}); err != nil {
+		t.Fatalf("write legacy summary: %v", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := service.historyStore.SaveCallSummary(context.Background(), contracts.HistoryCallSummary{
+		CallID:         "legacy-call",
+		SessionID:      "legacy-session",
+		WorkspaceID:    "legacy-workspace",
+		Method:         "tether.demo.v1.ReflectionDemo.Ping",
+		RPCType:        contracts.RPCTypeUnary,
+		EndpointID:     "legacy-endpoint",
+		State:          contracts.StreamStateClosed,
+		GRPCStatusCode: "OK",
+		StartedAt:      now,
+		FinishedAt:     now,
+		RequestCount:   1,
+		ResponseCount:  0,
+		SummaryPath:    summaryPath,
+	}); err != nil {
+		t.Fatalf("save legacy call summary: %v", err)
+	}
+
+	response := service.HistoryGet(context.Background(), "legacy-call")
+	if !response.Ok || response.Data == nil {
+		t.Fatalf("expected history detail, got %+v", response.Error)
+	}
+
+	if response.Data.Headers["set-cookie"][0] != "[REDACTED]" {
+		t.Fatalf("expected redacted legacy headers, got %+v", response.Data.Headers)
+	}
+	if response.Data.Trailers["set-cookie"][0] != "[REDACTED]" {
+		t.Fatalf("expected redacted legacy trailers, got %+v", response.Data.Trailers)
+	}
+
+	rewrittenPayload, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatalf("read rewritten summary: %v", err)
+	}
+	if strings.Contains(string(rewrittenPayload), "legacy-session-secret") || strings.Contains(string(rewrittenPayload), "legacy-refresh-secret") {
+		t.Fatalf("expected rewritten summary to drop raw secret metadata, got %s", rewrittenPayload)
 	}
 }
 

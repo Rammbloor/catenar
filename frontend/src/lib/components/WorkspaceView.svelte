@@ -12,15 +12,25 @@
     JsonValue,
     ProtoCatalogResult,
     ReflectionCatalogResult,
+    RequestSaveResult,
     TLSMode,
+    WorkspaceSnapshot,
+    WorkspaceValidationIssue,
   } from '../contracts'
+  import { getDiagnosticContextRows } from '../diagnostics'
   import {
+    BackendResponseError,
+    createWorkspace,
     getHistory,
     invokeUnary,
     listHistory,
     loadCatalogFromProtoSources,
     loadCatalogFromReflection,
+    openWorkspace,
+    saveRequest,
+    saveWorkspace,
     testEndpoint,
+    validateWorkspace,
   } from '../wails/backend'
 
   export let bootstrap: BootstrapData
@@ -59,8 +69,12 @@
   let invokeResult: CallInvokeUnaryResult | null = null
   let historySummaries: HistoryCallSummary[] = []
   let historyDetail: HistoryGetResult | null = null
+  let activeWorkspace: WorkspaceSnapshot | null = null
   let selectedHistoryCallId = ''
   let selectedCatalogMode: CatalogSourceKind = 'reflection'
+  let workspacePath = ''
+  let workspaceName = 'workspace'
+  let savedRequestId = ''
   let protoDirectoriesText = ''
   let protoFilesText = ''
   let importPathsText = ''
@@ -69,6 +83,7 @@
   let requestBodyError = ''
   let metadataError = ''
   let actionError = ''
+  let actionErrorDetails: Record<string, string> | undefined
   let infoMessage = ''
   let testPending = false
   let reflectionPending = false
@@ -76,15 +91,21 @@
   let invokePending = false
   let historyPending = false
   let historyDetailPending = false
+  let workspacePending = false
+  let requestSavePending = false
   let lastEndpointFingerprint = ''
   let lastProtoFingerprint = ''
   let lastCatalogMode: CatalogSourceKind = 'reflection'
   let bodyDrafts: Record<string, string> = {}
   let metadataDrafts: Record<string, string> = {}
+  let workspaceIssues: WorkspaceValidationIssue[] = []
+  let actionErrorContextRows: Array<{ label: string; value: string }> = []
 
   onMount(() => {
     void refreshHistory()
   })
+
+  $: actionErrorContextRows = getDiagnosticContextRows(actionErrorDetails)
 
   function buildEndpointPreset(): EndpointPreset {
     const tlsMode = endpoint.tls.mode
@@ -116,6 +137,60 @@
     })
   }
 
+  function buildProtoSources() {
+    return [
+      ...parseLineList(protoDirectoriesText).map((path) => ({ type: 'directory' as const, path })),
+      ...parseLineList(protoFilesText).map((path) => ({ type: 'file' as const, path })),
+    ]
+  }
+
+  function buildWorkspaceSaveInput() {
+    return {
+      name: workspaceName.trim() || activeWorkspace?.name || 'workspace',
+      endpoints: [buildEndpointPreset()],
+      protoSources: buildProtoSources(),
+      importPaths: parseLineList(importPathsText),
+    }
+  }
+
+  function applyWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
+    activeWorkspace = snapshot
+    workspacePath = snapshot.path
+    workspaceName = snapshot.name
+    workspaceIssues = []
+
+    if (snapshot.endpoints.length > 0) {
+      applyEndpointPreset(snapshot.endpoints[0])
+    }
+
+    protoDirectoriesText = snapshot.protoSources
+      .filter((source) => source.type === 'directory')
+      .map((source) => source.path)
+      .join('\n')
+    protoFilesText = snapshot.protoSources
+      .filter((source) => source.type === 'file')
+      .map((source) => source.path)
+      .join('\n')
+    importPathsText = (snapshot.importPaths ?? []).join('\n')
+    lastProtoFingerprint = buildProtoInputFingerprint()
+  }
+
+  function applyEndpointPreset(nextEndpoint: EndpointPreset): void {
+    endpoint = {
+      ...nextEndpoint,
+      authority: nextEndpoint.authority ?? '',
+      tls: {
+        mode: nextEndpoint.tls.mode,
+        serverNameOverride: nextEndpoint.tls.serverNameOverride ?? '',
+        caCert: nextEndpoint.tls.caCert ?? '',
+        clientCert: nextEndpoint.tls.clientCert ?? '',
+        clientKey: nextEndpoint.tls.clientKey ?? '',
+      },
+      metadataDefaults: nextEndpoint.metadataDefaults ?? {},
+    }
+    lastEndpointFingerprint = buildEndpointFingerprint()
+  }
+
   $: {
     const nextEndpointFingerprint = buildEndpointFingerprint()
     const nextProtoFingerprint = buildProtoInputFingerprint()
@@ -134,6 +209,7 @@
       historyDetail = null
       selectedHistoryCallId = ''
       actionError = ''
+      actionErrorDetails = undefined
       infoMessage = ''
       requestBodyError = ''
       metadataError = ''
@@ -181,6 +257,7 @@
     selectedMethod = method
     invokeResult = null
     actionError = ''
+    actionErrorDetails = undefined
     infoMessage = ''
     requestBodyError = ''
     metadataError = ''
@@ -260,6 +337,105 @@
     }
   }
 
+  function clearActionError(): void {
+    actionError = ''
+    actionErrorDetails = undefined
+  }
+
+  function setActionError(error: unknown, fallback: string): void {
+    if (error instanceof BackendResponseError) {
+      actionError = error.message
+      actionErrorDetails = error.details
+      return
+    }
+
+    actionError = error instanceof Error ? error.message : fallback
+    actionErrorDetails = undefined
+  }
+
+  function setWorkspaceResultMessage(snapshot: WorkspaceSnapshot, action: string): void {
+    const backupSuffix =
+      snapshot.backupPaths && snapshot.backupPaths.length > 0 ? ` Backup: ${snapshot.backupPaths[0]}.` : ''
+    infoMessage = `${action} ${snapshot.name} at ${snapshot.manifestPath}.${backupSuffix}`
+  }
+
+  async function runWorkspaceCreate(): Promise<void> {
+    clearActionError()
+    infoMessage = ''
+    workspaceIssues = []
+    workspacePending = true
+
+    try {
+      const result = await createWorkspace({
+        path: workspacePath,
+        ...buildWorkspaceSaveInput(),
+      })
+      applyWorkspaceSnapshot(result.workspace)
+      setWorkspaceResultMessage(result.workspace, 'Created workspace')
+    } catch (error) {
+      setActionError(error, 'Workspace could not be created.')
+    } finally {
+      workspacePending = false
+    }
+  }
+
+  async function runWorkspaceOpen(): Promise<void> {
+    clearActionError()
+    infoMessage = ''
+    workspaceIssues = []
+    workspacePending = true
+
+    try {
+      const result = await openWorkspace(workspacePath)
+      applyWorkspaceSnapshot(result.workspace)
+      activeCatalog = null
+      selectedMethod = null
+      invokeResult = null
+      setWorkspaceResultMessage(result.workspace, 'Opened workspace')
+    } catch (error) {
+      setActionError(error, 'Workspace could not be opened.')
+    } finally {
+      workspacePending = false
+    }
+  }
+
+  async function runWorkspaceSave(): Promise<void> {
+    clearActionError()
+    infoMessage = ''
+    workspaceIssues = []
+    workspacePending = true
+
+    try {
+      const result = await saveWorkspace(buildWorkspaceSaveInput())
+      applyWorkspaceSnapshot(result.workspace)
+      setWorkspaceResultMessage(result.workspace, 'Saved workspace')
+    } catch (error) {
+      setActionError(error, 'Workspace could not be saved.')
+    } finally {
+      workspacePending = false
+    }
+  }
+
+  async function runWorkspaceValidate(): Promise<void> {
+    clearActionError()
+    infoMessage = ''
+    workspaceIssues = []
+    workspacePending = true
+
+    try {
+      const result = await validateWorkspace(buildWorkspaceSaveInput())
+      workspaceIssues = result.issues
+      infoMessage =
+        result.issues.length === 0
+          ? 'Workspace draft passed open/save validation.'
+          : `Workspace draft has ${result.issues.length} validation issue${result.issues.length === 1 ? '' : 's'}.`
+    } catch (error) {
+      setActionError(error, 'Workspace could not be validated.')
+    } finally {
+      workspacePending = false
+    }
+  }
+
   async function loadHistoryDetail(callId: string): Promise<void> {
     selectedHistoryCallId = callId
     historyDetailPending = true
@@ -267,22 +443,23 @@
       historyDetail = await getHistory(callId)
     } catch (error) {
       historyDetail = null
-      actionError = error instanceof Error ? error.message : 'History detail could not be loaded.'
+      setActionError(error, 'History detail could not be loaded.')
     } finally {
       historyDetailPending = false
     }
   }
 
   async function runEndpointTest(): Promise<void> {
-    actionError = ''
+    clearActionError()
     infoMessage = ''
     endpointTestResult = null
     testPending = true
 
     try {
       endpointTestResult = await testEndpoint({ endpoint: buildEndpointPreset() })
+      applyEndpointPreset(endpointTestResult.endpoint)
     } catch (error) {
-      actionError = error instanceof Error ? error.message : 'Endpoint preflight failed unexpectedly.'
+      setActionError(error, 'Endpoint preflight failed unexpectedly.')
     } finally {
       testPending = false
     }
@@ -307,7 +484,7 @@
   }
 
   async function runReflectionLoad(): Promise<void> {
-    actionError = ''
+    clearActionError()
     infoMessage = ''
     activeCatalog = null
     selectedMethod = null
@@ -315,6 +492,7 @@
 
     try {
       const reflectionCatalog = await loadCatalogFromReflection({ endpoint: buildEndpointPreset() })
+      applyEndpointPreset(reflectionCatalog.endpoint)
       const nextCatalog = toActiveCatalog('reflection', reflectionCatalog)
       activeCatalog = nextCatalog
       const initialMethod = chooseInitialMethod(nextCatalog)
@@ -324,7 +502,7 @@
       await refreshHistory()
     } catch (error) {
       activeCatalog = null
-      actionError = error instanceof Error ? error.message : 'Reflection catalog load failed unexpectedly.'
+      setActionError(error, 'Reflection catalog load failed unexpectedly.')
     } finally {
       reflectionPending = false
     }
@@ -338,17 +516,15 @@
   }
 
   async function runProtoLoad(): Promise<void> {
-    const protoSources = [
-      ...parseLineList(protoDirectoriesText).map((path) => ({ type: 'directory' as const, path })),
-      ...parseLineList(protoFilesText).map((path) => ({ type: 'file' as const, path })),
-    ]
+    const protoSources = buildProtoSources()
 
     if (protoSources.length === 0) {
       actionError = 'Add at least one proto directory or file before loading the proto catalog.'
+      actionErrorDetails = undefined
       return
     }
 
-    actionError = ''
+    clearActionError()
     infoMessage = ''
     activeCatalog = null
     selectedMethod = null
@@ -360,6 +536,7 @@
         protoSources,
         importPaths: parseLineList(importPathsText),
       })
+      applyEndpointPreset(protoCatalog.endpoint)
       const nextCatalog = toActiveCatalog('proto', protoCatalog)
       activeCatalog = nextCatalog
       const initialMethod = chooseInitialMethod(nextCatalog)
@@ -369,7 +546,7 @@
       await refreshHistory()
     } catch (error) {
       activeCatalog = null
-      actionError = error instanceof Error ? error.message : 'Proto catalog load failed unexpectedly.'
+      setActionError(error, 'Proto catalog load failed unexpectedly.')
     } finally {
       protoPending = false
     }
@@ -378,15 +555,17 @@
   async function runUnaryInvoke(): Promise<void> {
     if (!activeCatalog || !selectedMethod) {
       actionError = 'Select a method from the loaded catalog before invoking.'
+      actionErrorDetails = undefined
       return
     }
 
-    actionError = ''
+    clearActionError()
     infoMessage = ''
     invokeResult = null
 
     if (selectedMethod.rpcType !== 'unary') {
       actionError = 'This invoke surface is still unary-only. Pick a unary method from the catalog.'
+      actionErrorDetails = undefined
       return
     }
 
@@ -412,10 +591,59 @@
       await refreshHistory()
       await loadHistoryDetail(invokeResult.callId)
     } catch (error) {
-      actionError = error instanceof Error ? error.message : 'Unary call failed unexpectedly.'
+      setActionError(error, 'Unary call failed unexpectedly.')
       await refreshHistory()
     } finally {
       invokePending = false
+    }
+  }
+
+  function defaultRequestId(method: CatalogMethod): string {
+    return method.fullName.replaceAll('/', '.').replace(/[^a-zA-Z0-9_.-]+/g, '-').toLowerCase()
+  }
+
+  async function runRequestSave(): Promise<void> {
+    if (!activeCatalog || !selectedMethod) {
+      actionError = 'Select a loaded method before saving a reusable request.'
+      actionErrorDetails = undefined
+      return
+    }
+
+    clearActionError()
+    infoMessage = ''
+
+    if (selectedMethod.rpcType !== 'unary') {
+      actionError = 'Saved request persistence is wired to the unary request composer in this slice.'
+      actionErrorDetails = undefined
+      return
+    }
+
+    const body = parseBodyText()
+    const metadata = parseMetadataText()
+    if (body === null || metadata === null) {
+      return
+    }
+
+    requestSavePending = true
+    try {
+      const result: RequestSaveResult = await saveRequest({
+        id: savedRequestId.trim() || defaultRequestId(selectedMethod),
+        method: selectedMethod.fullName,
+        rpcType: selectedMethod.rpcType,
+        endpointRef: activeCatalog.endpoint.id ?? endpoint.id ?? '',
+        metadataTemplate: metadata,
+        requestSpec: {
+          mode: 'single',
+          body,
+        },
+      })
+      applyWorkspaceSnapshot(result.workspace)
+      savedRequestId = result.savedRequest.id
+      infoMessage = `Saved request ${result.savedRequest.id} to ${result.savedRequest.path}.`
+    } catch (error) {
+      setActionError(error, 'Request could not be saved.')
+    } finally {
+      requestSavePending = false
     }
   }
 
@@ -453,12 +681,91 @@
 
 <section class="panel">
   <div class="stack">
-    <p class="eyebrow">Slice 2.1</p>
-    <h2 class="section-title">Proto sources and unary flow</h2>
+    <p class="eyebrow">Slice 2.2</p>
+    <h2 class="section-title">Workspace persistence v1</h2>
     <p class="section-copy">
-      Reflection and local proto sources now feed the same method picker, request templates and unary
-      runtime contract, while proto reload stays explicitly manual for MVP.
+      Reflection, proto inputs, reusable unary requests and endpoint presets now round-trip through the
+      file-backed workspace manifest.
     </p>
+  </div>
+
+  <div class="card stack">
+    <div class="card__header">
+      <h3>Workspace file</h3>
+      <div class="pill-row">
+        <span class="pill" class:pill--accent={activeWorkspace?.version === 1}>
+          {activeWorkspace ? `v${activeWorkspace.version}` : 'not open'}
+        </span>
+        {#if activeWorkspace}
+          <span class="pill">{activeWorkspace.savedRequests?.length ?? 0} requests</span>
+        {/if}
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <label class="field">
+        <span>Workspace path</span>
+        <input bind:value={workspacePath} placeholder="/absolute/path/to/workspace" />
+      </label>
+
+      <label class="field">
+        <span>Name</span>
+        <input bind:value={workspaceName} placeholder="workspace name" />
+      </label>
+    </div>
+
+    <div class="pill-row">
+      <button class="ghost-button" disabled={workspacePending} on:click={runWorkspaceCreate}>
+        {workspacePending ? 'Working…' : 'Create'}
+      </button>
+      <button class="ghost-button" disabled={workspacePending} on:click={runWorkspaceOpen}>
+        {workspacePending ? 'Working…' : 'Open'}
+      </button>
+      <button class="action-button" disabled={workspacePending || !activeWorkspace} on:click={runWorkspaceSave}>
+        {workspacePending ? 'Saving…' : 'Save'}
+      </button>
+      <button class="ghost-button" disabled={workspacePending || !activeWorkspace} on:click={runWorkspaceValidate}>
+        {workspacePending ? 'Checking…' : 'Validate'}
+      </button>
+    </div>
+
+    {#if activeWorkspace}
+      <div class="table-like">
+        <div class="table-row">
+          <strong>Manifest</strong>
+          <span>{activeWorkspace.manifestPath}</span>
+        </div>
+        <div class="table-row">
+          <strong>Workspace id</strong>
+          <span>{activeWorkspace.id}</span>
+        </div>
+      </div>
+    {/if}
+
+    {#if workspaceIssues.length > 0}
+      <div class="empty-state">
+        <div class="table-like">
+          {#each workspaceIssues as issue}
+            <div class="table-row">
+              <strong>{issue.code}</strong>
+              <span>{issue.field}: {issue.message}</span>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    {#if activeWorkspace?.savedRequests && activeWorkspace.savedRequests.length > 0}
+      <div class="history-list">
+        {#each activeWorkspace.savedRequests as request}
+          <div class="history-row">
+            <strong>{request.id}</strong>
+            <span>{request.method}</span>
+            <span>{request.path}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
   </div>
 
   <div class="two-column reflection-layout">
@@ -578,7 +885,17 @@
 
       {#if actionError}
         <div class="empty-state">
-          {actionError}
+          <div>{actionError}</div>
+          {#if actionErrorContextRows.length > 0}
+            <div class="table-like">
+              {#each actionErrorContextRows as detail}
+                <div class="table-row">
+                  <strong>{detail.label}</strong>
+                  <span>{detail.value}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
           <div class="subtle">Structured diagnostics still flow into the diagnostics panel when the runtime can classify the failure.</div>
         </div>
       {/if}
@@ -756,8 +1073,16 @@
             <div class="inline-error">{metadataError}</div>
           {/if}
 
+          <label class="field">
+            <span>Saved request id</span>
+            <input bind:value={savedRequestId} placeholder={defaultRequestId(selectedMethod)} />
+          </label>
+
           <div class="pill-row">
             <button class="ghost-button" on:click={() => selectedMethod && restoreTemplateDraft(selectedMethod)}>Reset to template</button>
+            <button class="ghost-button" disabled={requestSavePending || !activeWorkspace} on:click={runRequestSave}>
+              {requestSavePending ? 'Saving request…' : 'Save request'}
+            </button>
             <button class="action-button" disabled={invokePending || reflectionPending || protoPending} on:click={runUnaryInvoke}>
               {invokePending ? 'Invoking unary call…' : 'Invoke unary call'}
             </button>

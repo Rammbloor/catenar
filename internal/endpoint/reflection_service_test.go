@@ -230,10 +230,16 @@ var reflectionDemoServiceDesc = grpc.ServiceDesc{
 					return nil, status.Error(codes.InvalidArgument, "timestamp seconds must be non-negative")
 				}
 
-				if err := grpc.SetHeader(ctx, metadata.Pairs("x-reflection-demo", "ping")); err != nil {
+				if err := grpc.SetHeader(ctx, metadata.Pairs(
+					"x-reflection-demo", "ping",
+					"set-cookie", "session=reflection-secret",
+				)); err != nil {
 					return nil, err
 				}
-				if err := grpc.SetTrailer(ctx, metadata.Pairs("x-reflection-demo-trailer", "ok")); err != nil {
+				if err := grpc.SetTrailer(ctx, metadata.Pairs(
+					"x-reflection-demo-trailer", "ok",
+					"set-cookie", "refresh=reflection-secret",
+				)); err != nil {
 					return nil, err
 				}
 

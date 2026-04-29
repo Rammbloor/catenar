@@ -26,10 +26,30 @@ export function HistoryList(arg1) {
   return window['go']['main']['App']['HistoryList'](arg1);
 }
 
+export function RequestSave(arg1) {
+  return window['go']['main']['App']['RequestSave'](arg1);
+}
+
 export function ShellBootstrap() {
   return window['go']['main']['App']['ShellBootstrap']();
 }
 
 export function ShellEmitDiagnosticsProbe() {
   return window['go']['main']['App']['ShellEmitDiagnosticsProbe']();
+}
+
+export function WorkspaceCreate(arg1) {
+  return window['go']['main']['App']['WorkspaceCreate'](arg1);
+}
+
+export function WorkspaceOpen(arg1) {
+  return window['go']['main']['App']['WorkspaceOpen'](arg1);
+}
+
+export function WorkspaceSave(arg1) {
+  return window['go']['main']['App']['WorkspaceSave'](arg1);
+}
+
+export function WorkspaceValidate(arg1) {
+  return window['go']['main']['App']['WorkspaceValidate'](arg1);
 }

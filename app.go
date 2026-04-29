@@ -7,20 +7,26 @@ import (
 	"tether/internal/appshell"
 	"tether/internal/contracts"
 	"tether/internal/endpoint"
+	"tether/internal/workspace"
 )
 
 // App wires Wails lifecycle hooks to the application shell service.
 type App struct {
-	ctx      context.Context
-	shell    *appshell.Service
-	endpoint *endpoint.Service
+	ctx       context.Context
+	shell     *appshell.Service
+	workspace *workspace.Manager
+	endpoint  *endpoint.Service
 }
 
 // NewApp creates the application root.
 func NewApp() *App {
+	workspaceManager := workspace.NewManager(workspace.ManagerOptions{})
 	return &App{
-		shell:    appshell.NewService(),
-		endpoint: endpoint.NewService(endpoint.ServiceDependencies{}),
+		shell:     appshell.NewService(),
+		workspace: workspaceManager,
+		endpoint: endpoint.NewService(endpoint.ServiceDependencies{
+			WorkspaceManager: workspaceManager,
+		}),
 	}
 }
 
@@ -41,6 +47,31 @@ func (a *App) ShellBootstrap() appshell.BootstrapResponse {
 // diagnostics update and returning an acknowledgement to the frontend.
 func (a *App) ShellEmitDiagnosticsProbe() appshell.ProbeResponse {
 	return a.shell.EmitDiagnosticsProbe()
+}
+
+// WorkspaceCreate creates a file-backed workspace manifest at the requested path.
+func (a *App) WorkspaceCreate(input contracts.WorkspaceCreateInput) contracts.WorkspaceResponse {
+	return a.workspace.Create(contextOrBackground(a.ctx), input)
+}
+
+// WorkspaceOpen opens a file-backed workspace manifest by directory or manifest path.
+func (a *App) WorkspaceOpen(path string) contracts.WorkspaceResponse {
+	return a.workspace.Open(contextOrBackground(a.ctx), path)
+}
+
+// WorkspaceSave persists the active workspace manifest with the latest editor draft.
+func (a *App) WorkspaceSave(input contracts.WorkspaceSaveInput) contracts.WorkspaceResponse {
+	return a.workspace.Save(contextOrBackground(a.ctx), input)
+}
+
+// WorkspaceValidate validates the active workspace draft without writing it.
+func (a *App) WorkspaceValidate(input contracts.WorkspaceValidateInput) contracts.WorkspaceValidateResponse {
+	return a.workspace.Validate(contextOrBackground(a.ctx), input)
+}
+
+// RequestSave writes a reusable saved request document and updates the workspace manifest.
+func (a *App) RequestSave(input contracts.RequestSaveInput) contracts.RequestSaveResponse {
+	return a.workspace.RequestSave(contextOrBackground(a.ctx), input)
 }
 
 // EndpointTest runs transport and TLS preflight checks for a single endpoint preset.
@@ -164,4 +195,12 @@ type wailsEmitter struct {
 func (e wailsEmitter) Emit(eventName contracts.EventName, payload any) error {
 	wailsruntime.EventsEmit(e.ctx, string(eventName), payload)
 	return nil
+}
+
+func contextOrBackground(ctx context.Context) context.Context {
+	if ctx != nil {
+		return ctx
+	}
+
+	return context.Background()
 }

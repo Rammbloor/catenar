@@ -125,8 +125,46 @@ func (l *protoLoader) LoadCatalog(ctx context.Context, input ProtoLoaderInput) (
 
 func buildProtoCompilePlan(input ProtoLoaderInput) (protoCompilePlan, *endpointDiagnostic) {
 	sources := make([]contracts.ProtoSource, 0, len(input.ProtoSources))
-	importRoots := make([]string, 0, len(input.ImportPaths)+len(input.ProtoSources))
-	seenImportRoots := map[string]struct{}{}
+	sourceRoots := make([]string, 0, len(input.ProtoSources))
+	configuredImportRoots := make([]string, 0, len(input.ImportPaths))
+	seenSourceRoots := map[string]struct{}{}
+	seenConfiguredImportRoots := map[string]struct{}{}
+
+	appendSourceRoot := func(root string) {
+		if _, seen := seenSourceRoots[root]; seen {
+			return
+		}
+		sourceRoots = append(sourceRoots, root)
+		seenSourceRoots[root] = struct{}{}
+	}
+
+	appendConfiguredImportRoot := func(root string) {
+		if _, seen := seenConfiguredImportRoots[root]; seen {
+			return
+		}
+		configuredImportRoots = append(configuredImportRoots, root)
+		seenConfiguredImportRoots[root] = struct{}{}
+	}
+
+	mergeResolverRoots := func() []string {
+		roots := make([]string, 0, len(sourceRoots)+len(configuredImportRoots))
+		seenRoots := map[string]struct{}{}
+		for _, root := range sourceRoots {
+			if _, seen := seenRoots[root]; seen {
+				continue
+			}
+			roots = append(roots, root)
+			seenRoots[root] = struct{}{}
+		}
+		for _, root := range configuredImportRoots {
+			if _, seen := seenRoots[root]; seen {
+				continue
+			}
+			roots = append(roots, root)
+			seenRoots[root] = struct{}{}
+		}
+		return roots
+	}
 
 	for _, importPath := range input.ImportPaths {
 		normalizedPath := strings.TrimSpace(importPath)
@@ -156,10 +194,7 @@ func buildProtoCompilePlan(input ProtoLoaderInput) (protoCompilePlan, *endpointD
 			}
 		}
 
-		if _, seen := seenImportRoots[absolutePath]; !seen {
-			importRoots = append(importRoots, absolutePath)
-			seenImportRoots[absolutePath] = struct{}{}
-		}
+		appendConfiguredImportRoot(absolutePath)
 	}
 
 	for _, source := range input.ProtoSources {
@@ -206,10 +241,7 @@ func buildProtoCompilePlan(input ProtoLoaderInput) (protoCompilePlan, *endpointD
 				}
 			}
 
-			if _, seen := seenImportRoots[absolutePath]; !seen {
-				importRoots = append(importRoots, absolutePath)
-				seenImportRoots[absolutePath] = struct{}{}
-			}
+			appendSourceRoot(absolutePath)
 		} else if info.IsDir() {
 			return protoCompilePlan{}, &endpointDiagnostic{
 				Level:    "error",
@@ -231,6 +263,8 @@ func buildProtoCompilePlan(input ProtoLoaderInput) (protoCompilePlan, *endpointD
 
 	entryNames := make([]string, 0)
 	seenEntries := map[string]struct{}{}
+	// Explicit sources should shadow generic import roots when the same relative path exists in both.
+	resolverRoots := mergeResolverRoots()
 	for _, source := range sources {
 		switch source.Type {
 		case contracts.ProtoSourceTypeDirectory:
@@ -247,16 +281,14 @@ func buildProtoCompilePlan(input ProtoLoaderInput) (protoCompilePlan, *endpointD
 				seenEntries[entryName] = struct{}{}
 			}
 		case contracts.ProtoSourceTypeFile:
-			entryName, fileImportRoot, diagnostic := buildFileProtoEntry(source.Path, importRoots)
+			entryName, fileImportRoot, diagnostic := buildFileProtoEntry(source.Path, resolverRoots)
 			if diagnostic != nil {
 				return protoCompilePlan{}, diagnostic
 			}
 
 			if fileImportRoot != "" {
-				if _, seen := seenImportRoots[fileImportRoot]; !seen {
-					importRoots = append(importRoots, fileImportRoot)
-					seenImportRoots[fileImportRoot] = struct{}{}
-				}
+				appendSourceRoot(fileImportRoot)
+				resolverRoots = mergeResolverRoots()
 			}
 
 			if _, seen := seenEntries[entryName]; seen {
@@ -278,9 +310,10 @@ func buildProtoCompilePlan(input ProtoLoaderInput) (protoCompilePlan, *endpointD
 	}
 
 	sort.Strings(entryNames)
+	resolverRoots = mergeResolverRoots()
 	return protoCompilePlan{
 		entryNames:  entryNames,
-		importRoots: importRoots,
+		importRoots: resolverRoots,
 		sourceCount: len(sources),
 	}, nil
 }

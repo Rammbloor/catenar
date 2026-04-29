@@ -15,6 +15,16 @@ export function HistoryGet(arg1:string):Promise<contracts.HistoryGetResponse>;
 
 export function HistoryList(arg1:contracts.HistoryListInput):Promise<contracts.HistoryListResponse>;
 
+export function RequestSave(arg1:contracts.RequestSaveInput):Promise<contracts.RequestSaveResponse>;
+
 export function ShellBootstrap():Promise<appshell.BootstrapResponse>;
 
 export function ShellEmitDiagnosticsProbe():Promise<appshell.ProbeResponse>;
+
+export function WorkspaceCreate(arg1:contracts.WorkspaceCreateInput):Promise<contracts.WorkspaceResponse>;
+
+export function WorkspaceOpen(arg1:string):Promise<contracts.WorkspaceResponse>;
+
+export function WorkspaceSave(arg1:contracts.WorkspaceSaveInput):Promise<contracts.WorkspaceResponse>;
+
+export function WorkspaceValidate(arg1:contracts.WorkspaceValidateInput):Promise<contracts.WorkspaceValidateResponse>;

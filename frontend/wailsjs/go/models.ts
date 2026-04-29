@@ -1,5 +1,5 @@
 export namespace appshell {
-	
+
 	export class AppMetadata {
 	    name: string;
 	    productLine: string;
@@ -7,11 +7,11 @@ export namespace appshell {
 	    architecture: string;
 	    goVersion: string;
 	    wailsVersion: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AppMetadata(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -26,11 +26,11 @@ export namespace appshell {
 	    slice: string;
 	    status: string;
 	    summary: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SliceStatus(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.slice = source["slice"];
@@ -42,11 +42,11 @@ export namespace appshell {
 	    primaryFlow: string[];
 	    overlayViews: string[];
 	    singleActiveLiveSession: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new StateModelSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.primaryFlow = source["primaryFlow"];
@@ -58,11 +58,11 @@ export namespace appshell {
 	    id: string;
 	    title: string;
 	    purpose: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new LayoutRegion(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -72,16 +72,16 @@ export namespace appshell {
 	}
 	export class LayoutDefinition {
 	    regions: LayoutRegion[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new LayoutDefinition(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.regions = this.convertValues(source["regions"], LayoutRegion);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -106,11 +106,11 @@ export namespace appshell {
 	    layout: LayoutDefinition;
 	    stateModel: StateModelSummary;
 	    epicZero: SliceStatus[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new BootstrapData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.app = this.convertValues(source["app"], AppMetadata);
@@ -119,7 +119,7 @@ export namespace appshell {
 	        this.stateModel = this.convertValues(source["stateModel"], StateModelSummary);
 	        this.epicZero = this.convertValues(source["epicZero"], SliceStatus);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -142,18 +142,18 @@ export namespace appshell {
 	    ok: boolean;
 	    data?: BootstrapData;
 	    error?: contracts.ErrorEnvelope;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new BootstrapResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
 	        this.data = this.convertValues(source["data"], BootstrapData);
 	        this.error = this.convertValues(source["error"], contracts.ErrorEnvelope);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -172,18 +172,18 @@ export namespace appshell {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class ProbeAcknowledgement {
 	    eventId: string;
 	    eventName: string;
 	    emittedAt: string;
 	    classification: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ProbeAcknowledgement(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.eventId = source["eventId"];
@@ -196,18 +196,18 @@ export namespace appshell {
 	    ok: boolean;
 	    data?: ProbeAcknowledgement;
 	    error?: contracts.ErrorEnvelope;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ProbeResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
 	        this.data = this.convertValues(source["data"], ProbeAcknowledgement);
 	        this.error = this.convertValues(source["error"], contracts.ErrorEnvelope);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -226,20 +226,20 @@ export namespace appshell {
 		    return a;
 		}
 	}
-	
+
 
 }
 
 export namespace contracts {
-	
+
 	export class CallOptions {
 	    requestTimeoutMs?: number;
 	    streamIdleTimeoutMs?: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CallOptions(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.requestTimeoutMs = source["requestTimeoutMs"];
@@ -254,11 +254,11 @@ export namespace contracts {
 	    metadata?: Record<string, string>;
 	    body: any;
 	    callOptions?: CallOptions;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CallInvokeUnaryInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.catalogSource = source["catalogSource"];
@@ -269,7 +269,7 @@ export namespace contracts {
 	        this.body = source["body"];
 	        this.callOptions = this.convertValues(source["callOptions"], CallOptions);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -293,11 +293,11 @@ export namespace contracts {
 	    category: string;
 	    message: string;
 	    details?: Record<string, string>;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ErrorEnvelope(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.code = source["code"];
@@ -316,11 +316,11 @@ export namespace contracts {
 	    nextStep?: string;
 	    details?: Record<string, string>;
 	    ts: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DiagnosticsUpdateEvent(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -337,11 +337,11 @@ export namespace contracts {
 	export class StreamStatus {
 	    code: string;
 	    message: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new StreamStatus(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.code = source["code"];
@@ -364,11 +364,11 @@ export namespace contracts {
 	    startedAt: string;
 	    finishedAt: string;
 	    durationMs: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CallInvokeUnaryResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.callId = source["callId"];
@@ -387,7 +387,7 @@ export namespace contracts {
 	        this.finishedAt = source["finishedAt"];
 	        this.durationMs = source["durationMs"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -410,18 +410,18 @@ export namespace contracts {
 	    ok: boolean;
 	    data?: CallInvokeUnaryResult;
 	    error?: ErrorEnvelope;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CallInvokeUnaryResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
 	        this.data = this.convertValues(source["data"], CallInvokeUnaryResult);
 	        this.error = this.convertValues(source["error"], ErrorEnvelope);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -440,16 +440,16 @@ export namespace contracts {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class ProtoSource {
 	    type: string;
 	    path: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ProtoSource(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.type = source["type"];
@@ -462,11 +462,11 @@ export namespace contracts {
 	    caCert?: string;
 	    clientCert?: string;
 	    clientKey?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EndpointTLSSettings(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.mode = source["mode"];
@@ -486,11 +486,11 @@ export namespace contracts {
 	    requestTimeoutMs?: number;
 	    streamIdleTimeoutMs?: number;
 	    metadataDefaults?: Record<string, string>;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EndpointPreset(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -503,7 +503,7 @@ export namespace contracts {
 	        this.streamIdleTimeoutMs = source["streamIdleTimeoutMs"];
 	        this.metadataDefaults = source["metadataDefaults"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -526,18 +526,18 @@ export namespace contracts {
 	    endpoint: EndpointPreset;
 	    protoSources: ProtoSource[];
 	    importPaths?: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CatalogLoadFromProtoSourcesInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.endpoint = this.convertValues(source["endpoint"], EndpointPreset);
 	        this.protoSources = this.convertValues(source["protoSources"], ProtoSource);
 	        this.importPaths = source["importPaths"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -560,11 +560,11 @@ export namespace contracts {
 	    name: string;
 	    fullName: string;
 	    isWellKnown: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CatalogMessageRef(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -578,11 +578,11 @@ export namespace contracts {
 	    rpcType: string;
 	    requestType: CatalogMessageRef;
 	    responseType: CatalogMessageRef;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CatalogMethod(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -591,7 +591,7 @@ export namespace contracts {
 	        this.requestType = this.convertValues(source["requestType"], CatalogMessageRef);
 	        this.responseType = this.convertValues(source["responseType"], CatalogMessageRef);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -614,18 +614,18 @@ export namespace contracts {
 	    name: string;
 	    fullName: string;
 	    methods: CatalogMethod[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CatalogService(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.fullName = source["fullName"];
 	        this.methods = this.convertValues(source["methods"], CatalogMethod);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -654,11 +654,11 @@ export namespace contracts {
 	    diagnostic?: DiagnosticsUpdateEvent;
 	    loadedAt: string;
 	    durationMs: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ProtoCatalogResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.endpoint = this.convertValues(source["endpoint"], EndpointPreset);
@@ -671,7 +671,7 @@ export namespace contracts {
 	        this.loadedAt = source["loadedAt"];
 	        this.durationMs = source["durationMs"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -694,18 +694,18 @@ export namespace contracts {
 	    ok: boolean;
 	    data?: ProtoCatalogResult;
 	    error?: ErrorEnvelope;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CatalogLoadFromProtoSourcesResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
 	        this.data = this.convertValues(source["data"], ProtoCatalogResult);
 	        this.error = this.convertValues(source["error"], ErrorEnvelope);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -726,16 +726,16 @@ export namespace contracts {
 	}
 	export class CatalogLoadFromReflectionInput {
 	    endpoint: EndpointPreset;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CatalogLoadFromReflectionInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.endpoint = this.convertValues(source["endpoint"], EndpointPreset);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -762,11 +762,11 @@ export namespace contracts {
 	    diagnostic?: DiagnosticsUpdateEvent;
 	    loadedAt: string;
 	    durationMs: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ReflectionCatalogResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.endpoint = this.convertValues(source["endpoint"], EndpointPreset);
@@ -777,7 +777,7 @@ export namespace contracts {
 	        this.loadedAt = source["loadedAt"];
 	        this.durationMs = source["durationMs"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -800,18 +800,18 @@ export namespace contracts {
 	    ok: boolean;
 	    data?: ReflectionCatalogResult;
 	    error?: ErrorEnvelope;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CatalogLoadFromReflectionResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
 	        this.data = this.convertValues(source["data"], ReflectionCatalogResult);
 	        this.error = this.convertValues(source["error"], ErrorEnvelope);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -830,17 +830,17 @@ export namespace contracts {
 		    return a;
 		}
 	}
-	
-	
-	
+
+
+
 	export class ModuleContract {
 	    name: string;
 	    responsibility: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ModuleContract(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -852,11 +852,11 @@ export namespace contracts {
 	    event: string;
 	    to: string[];
 	    notes?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new TransitionRule(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.from = source["from"];
@@ -877,11 +877,11 @@ export namespace contracts {
 	    sessionConditions: string[];
 	    transitions: TransitionRule[];
 	    modules: ModuleContract[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ContractManifest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -896,7 +896,7 @@ export namespace contracts {
 	        this.transitions = this.convertValues(source["transitions"], TransitionRule);
 	        this.modules = this.convertValues(source["modules"], ModuleContract);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -915,17 +915,17 @@ export namespace contracts {
 		    return a;
 		}
 	}
-	
+
 	export class EndpointCheck {
 	    stage: string;
 	    outcome: string;
 	    message: string;
 	    details?: Record<string, string>;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EndpointCheck(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.stage = source["stage"];
@@ -934,20 +934,20 @@ export namespace contracts {
 	        this.details = source["details"];
 	    }
 	}
-	
-	
+
+
 	export class EndpointTestInput {
 	    endpoint: EndpointPreset;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EndpointTestInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.endpoint = this.convertValues(source["endpoint"], EndpointPreset);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -977,11 +977,11 @@ export namespace contracts {
 	    diagnostic?: DiagnosticsUpdateEvent;
 	    testedAt: string;
 	    durationMs: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EndpointTestResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.endpoint = this.convertValues(source["endpoint"], EndpointPreset);
@@ -995,7 +995,7 @@ export namespace contracts {
 	        this.testedAt = source["testedAt"];
 	        this.durationMs = source["durationMs"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1018,18 +1018,18 @@ export namespace contracts {
 	    ok: boolean;
 	    data?: EndpointTestResult;
 	    error?: ErrorEnvelope;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EndpointTestResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
 	        this.data = this.convertValues(source["data"], EndpointTestResult);
 	        this.error = this.convertValues(source["error"], ErrorEnvelope);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1048,8 +1048,8 @@ export namespace contracts {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class HistoryCallSummary {
 	    callId: string;
 	    sessionId?: string;
@@ -1069,11 +1069,11 @@ export namespace contracts {
 	    errorCode?: string;
 	    summaryPath?: string;
 	    sessionLogPath?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HistoryCallSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.callId = source["callId"];
@@ -1101,11 +1101,11 @@ export namespace contracts {
 	    rpcType?: string;
 	    statusCode?: string;
 	    metadata?: Record<string, Array<string>>;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HistoryLogGRPC(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.method = source["method"];
@@ -1116,11 +1116,11 @@ export namespace contracts {
 	}
 	export class HistoryLogPreview {
 	    json?: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HistoryLogPreview(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.json = source["json"];
@@ -1138,11 +1138,11 @@ export namespace contracts {
 	    grpc?: HistoryLogGRPC;
 	    details?: Record<string, string>;
 	    ts: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HistoryLogEvent(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.callId = source["callId"];
@@ -1157,7 +1157,7 @@ export namespace contracts {
 	        this.details = source["details"];
 	        this.ts = source["ts"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1184,11 +1184,11 @@ export namespace contracts {
 	    trailers?: Record<string, Array<string>>;
 	    status: StreamStatus;
 	    events: HistoryLogEvent[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HistoryGetResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.summary = this.convertValues(source["summary"], HistoryCallSummary);
@@ -1199,7 +1199,7 @@ export namespace contracts {
 	        this.status = this.convertValues(source["status"], StreamStatus);
 	        this.events = this.convertValues(source["events"], HistoryLogEvent);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1222,18 +1222,18 @@ export namespace contracts {
 	    ok: boolean;
 	    data?: HistoryGetResult;
 	    error?: ErrorEnvelope;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HistoryGetResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
 	        this.data = this.convertValues(source["data"], HistoryGetResult);
 	        this.error = this.convertValues(source["error"], ErrorEnvelope);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1252,14 +1252,14 @@ export namespace contracts {
 		    return a;
 		}
 	}
-	
+
 	export class HistoryListInput {
 	    limit?: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HistoryListInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.limit = source["limit"];
@@ -1267,16 +1267,16 @@ export namespace contracts {
 	}
 	export class HistoryListResult {
 	    calls: HistoryCallSummary[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HistoryListResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.calls = this.convertValues(source["calls"], HistoryCallSummary);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1299,18 +1299,18 @@ export namespace contracts {
 	    ok: boolean;
 	    data?: HistoryListResult;
 	    error?: ErrorEnvelope;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HistoryListResponse(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
 	        this.data = this.convertValues(source["data"], HistoryListResult);
 	        this.error = this.convertValues(source["error"], ErrorEnvelope);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1329,15 +1329,507 @@ export namespace contracts {
 		    return a;
 		}
 	}
-	
-	
-	
-	
-	
-	
-	
-	
-	
+
+
+
+
+
+
+
+
+	export class StreamMessage {
+	    body: any;
+
+	    static createFrom(source: any = {}) {
+	        return new StreamMessage(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.body = source["body"];
+	    }
+	}
+	export class SavedRequestSpec {
+	    mode: string;
+	    body?: any;
+	    messages?: StreamMessage[];
+
+	    static createFrom(source: any = {}) {
+	        return new SavedRequestSpec(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.body = source["body"];
+	        this.messages = this.convertValues(source["messages"], StreamMessage);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RequestSaveInput {
+	    id: string;
+	    method: string;
+	    rpcType: string;
+	    endpointRef: string;
+	    environmentRef?: string;
+	    metadataTemplate?: Record<string, string>;
+	    callOptions?: CallOptions;
+	    requestSpec: SavedRequestSpec;
+
+	    static createFrom(source: any = {}) {
+	        return new RequestSaveInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.method = source["method"];
+	        this.rpcType = source["rpcType"];
+	        this.endpointRef = source["endpointRef"];
+	        this.environmentRef = source["environmentRef"];
+	        this.metadataTemplate = source["metadataTemplate"];
+	        this.callOptions = this.convertValues(source["callOptions"], CallOptions);
+	        this.requestSpec = this.convertValues(source["requestSpec"], SavedRequestSpec);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class WorkspaceSavedRequestSummary {
+	    id: string;
+	    path: string;
+	    method: string;
+	    rpcType: string;
+	    endpointRef: string;
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceSavedRequestSummary(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.path = source["path"];
+	        this.method = source["method"];
+	        this.rpcType = source["rpcType"];
+	        this.endpointRef = source["endpointRef"];
+	    }
+	}
+	export class WorkspaceSnapshot {
+	    id: string;
+	    version: number;
+	    name: string;
+	    path: string;
+	    manifestPath: string;
+	    endpoints: EndpointPreset[];
+	    protoSources: ProtoSource[];
+	    importPaths?: string[];
+	    savedRequests?: WorkspaceSavedRequestSummary[];
+	    backupPaths?: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceSnapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.version = source["version"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.manifestPath = source["manifestPath"];
+	        this.endpoints = this.convertValues(source["endpoints"], EndpointPreset);
+	        this.protoSources = this.convertValues(source["protoSources"], ProtoSource);
+	        this.importPaths = source["importPaths"];
+	        this.savedRequests = this.convertValues(source["savedRequests"], WorkspaceSavedRequestSummary);
+	        this.backupPaths = source["backupPaths"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RequestSaveResult {
+	    workspace: WorkspaceSnapshot;
+	    savedRequest: WorkspaceSavedRequestSummary;
+
+	    static createFrom(source: any = {}) {
+	        return new RequestSaveResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.workspace = this.convertValues(source["workspace"], WorkspaceSnapshot);
+	        this.savedRequest = this.convertValues(source["savedRequest"], WorkspaceSavedRequestSummary);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RequestSaveResponse {
+	    ok: boolean;
+	    data?: RequestSaveResult;
+	    error?: ErrorEnvelope;
+
+	    static createFrom(source: any = {}) {
+	        return new RequestSaveResponse(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], RequestSaveResult);
+	        this.error = this.convertValues(source["error"], ErrorEnvelope);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
+
+
+
+	export class WorkspaceCreateInput {
+	    path: string;
+	    name?: string;
+	    endpoints?: EndpointPreset[];
+	    protoSources?: ProtoSource[];
+	    importPaths?: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceCreateInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.endpoints = this.convertValues(source["endpoints"], EndpointPreset);
+	        this.protoSources = this.convertValues(source["protoSources"], ProtoSource);
+	        this.importPaths = source["importPaths"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class WorkspaceResult {
+	    workspace: WorkspaceSnapshot;
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.workspace = this.convertValues(source["workspace"], WorkspaceSnapshot);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class WorkspaceResponse {
+	    ok: boolean;
+	    data?: WorkspaceResult;
+	    error?: ErrorEnvelope;
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceResponse(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], WorkspaceResult);
+	        this.error = this.convertValues(source["error"], ErrorEnvelope);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+	export class WorkspaceSaveInput {
+	    name?: string;
+	    endpoints?: EndpointPreset[];
+	    protoSources?: ProtoSource[];
+	    importPaths?: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceSaveInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.endpoints = this.convertValues(source["endpoints"], EndpointPreset);
+	        this.protoSources = this.convertValues(source["protoSources"], ProtoSource);
+	        this.importPaths = source["importPaths"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
+	export class WorkspaceValidateInput {
+	    name?: string;
+	    endpoints?: EndpointPreset[];
+	    protoSources?: ProtoSource[];
+	    importPaths?: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceValidateInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.endpoints = this.convertValues(source["endpoints"], EndpointPreset);
+	        this.protoSources = this.convertValues(source["protoSources"], ProtoSource);
+	        this.importPaths = source["importPaths"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class WorkspaceValidationIssue {
+	    field: string;
+	    code: string;
+	    category: string;
+	    message: string;
+	    path?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceValidationIssue(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.field = source["field"];
+	        this.code = source["code"];
+	        this.category = source["category"];
+	        this.message = source["message"];
+	        this.path = source["path"];
+	    }
+	}
+	export class WorkspaceValidateResult {
+	    workspace?: WorkspaceSnapshot;
+	    issues: WorkspaceValidationIssue[];
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceValidateResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.workspace = this.convertValues(source["workspace"], WorkspaceSnapshot);
+	        this.issues = this.convertValues(source["issues"], WorkspaceValidationIssue);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class WorkspaceValidateResponse {
+	    ok: boolean;
+	    data?: WorkspaceValidateResult;
+	    error?: ErrorEnvelope;
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceValidateResponse(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], WorkspaceValidateResult);
+	        this.error = this.convertValues(source["error"], ErrorEnvelope);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
 
 }
 

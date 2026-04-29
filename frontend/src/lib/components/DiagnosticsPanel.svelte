@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte'
   import type { DiagnosticsUpdateEvent, EventProbeState } from '../contracts'
+  import { getDiagnosticContextRows } from '../diagnostics'
 
   export let isOpen: boolean
   export let diagnostics: DiagnosticsUpdateEvent[]
@@ -66,6 +67,16 @@
               <div>{diagnostic.message}</div>
               {#if diagnostic.nextStep}
                 <div class="subtle">Next step: {diagnostic.nextStep}</div>
+              {/if}
+              {#if diagnostic.details}
+                <div class="table-like">
+                  {#each getDiagnosticContextRows(diagnostic.details) as detail}
+                    <div class="table-row">
+                      <strong>{detail.label}</strong>
+                      <span>{detail.value}</span>
+                    </div>
+                  {/each}
+                </div>
               {/if}
             </article>
           {/each}

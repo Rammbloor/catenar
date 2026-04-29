@@ -24,6 +24,8 @@ type classifiedError struct {
 	NextStep string
 }
 
+type ClassifiedError = classifiedError
+
 func (e *classifiedError) Error() string {
 	return e.Envelope.Message
 }

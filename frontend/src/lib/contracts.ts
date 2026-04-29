@@ -94,6 +94,10 @@ export interface CallOptions {
   streamIdleTimeoutMs?: number
 }
 
+export interface StreamMessage {
+  body: JsonValue
+}
+
 export interface StreamStatus {
   code: string
   message: string
@@ -226,6 +230,106 @@ export interface EndpointPreset {
   requestTimeoutMs?: number
   streamIdleTimeoutMs?: number
   metadataDefaults?: Record<string, string>
+}
+
+export interface WorkspaceCreateInput {
+  path: string
+  name?: string
+  endpoints?: EndpointPreset[]
+  protoSources?: ProtoSource[]
+  importPaths?: string[]
+}
+
+export interface WorkspaceSaveInput {
+  name?: string
+  endpoints?: EndpointPreset[]
+  protoSources?: ProtoSource[]
+  importPaths?: string[]
+}
+
+export interface WorkspaceValidateInput {
+  name?: string
+  endpoints?: EndpointPreset[]
+  protoSources?: ProtoSource[]
+  importPaths?: string[]
+}
+
+export interface WorkspaceValidationIssue {
+  field: string
+  code: string
+  category: ErrorCategory
+  message: string
+  path?: string
+}
+
+export interface WorkspaceSavedRequestSummary {
+  id: string
+  path: string
+  method: string
+  rpcType: RPCType
+  endpointRef: string
+}
+
+export interface WorkspaceSnapshot {
+  id: string
+  version: number
+  name: string
+  path: string
+  manifestPath: string
+  endpoints: EndpointPreset[]
+  protoSources: ProtoSource[]
+  importPaths?: string[]
+  savedRequests?: WorkspaceSavedRequestSummary[]
+  backupPaths?: string[]
+}
+
+export interface WorkspaceResult {
+  workspace: WorkspaceSnapshot
+}
+
+export interface WorkspaceValidateResult {
+  workspace?: WorkspaceSnapshot
+  issues: WorkspaceValidationIssue[]
+}
+
+export interface WorkspaceResponse {
+  ok: boolean
+  data?: WorkspaceResult
+  error?: ErrorEnvelope
+}
+
+export interface WorkspaceValidateResponse {
+  ok: boolean
+  data?: WorkspaceValidateResult
+  error?: ErrorEnvelope
+}
+
+export interface SavedRequestSpec {
+  mode: string
+  body?: JsonValue
+  messages?: StreamMessage[]
+}
+
+export interface RequestSaveInput {
+  id: string
+  method: string
+  rpcType: RPCType
+  endpointRef: string
+  environmentRef?: string
+  metadataTemplate?: Record<string, string>
+  callOptions?: CallOptions
+  requestSpec: SavedRequestSpec
+}
+
+export interface RequestSaveResult {
+  workspace: WorkspaceSnapshot
+  savedRequest: WorkspaceSavedRequestSummary
+}
+
+export interface RequestSaveResponse {
+  ok: boolean
+  data?: RequestSaveResult
+  error?: ErrorEnvelope
 }
 
 export interface EndpointValidationIssue {

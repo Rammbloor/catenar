@@ -138,6 +138,10 @@ func normalizeEndpointPreset(endpointPreset contracts.EndpointPreset) contracts.
 	return normalized
 }
 
+func NormalizeEndpointPreset(endpointPreset contracts.EndpointPreset) contracts.EndpointPreset {
+	return normalizeEndpointPreset(endpointPreset)
+}
+
 func newValidationIssue(field, code, message string) contracts.EndpointValidationIssue {
 	return contracts.EndpointValidationIssue{
 		Field:   field,

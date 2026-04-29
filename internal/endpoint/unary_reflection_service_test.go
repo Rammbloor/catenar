@@ -2,7 +2,9 @@ package endpoint
 
 import (
 	"context"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -237,6 +239,20 @@ func TestCallInvokeUnaryUsesCachedReflectionCatalogAndPersistsHistory(t *testing
 	}
 	if startedEvent.GRPC.Metadata["x-request-id"][0] != "req-123" {
 		t.Fatalf("expected non-secret metadata to be preserved, got %+v", startedEvent.GRPC.Metadata)
+	}
+	if historyGet.Data.Headers["set-cookie"][0] != "[REDACTED]" {
+		t.Fatalf("expected persisted headers to redact secrets, got %+v", historyGet.Data.Headers)
+	}
+	if historyGet.Data.Trailers["set-cookie"][0] != "[REDACTED]" {
+		t.Fatalf("expected persisted trailers to redact secrets, got %+v", historyGet.Data.Trailers)
+	}
+
+	summaryPayload, err := os.ReadFile(summary.SummaryPath)
+	if err != nil {
+		t.Fatalf("read summary payload: %v", err)
+	}
+	if strings.Contains(string(summaryPayload), "reflection-secret") {
+		t.Fatalf("expected persisted summary artifact to omit raw secret metadata, got %s", summaryPayload)
 	}
 }
 
