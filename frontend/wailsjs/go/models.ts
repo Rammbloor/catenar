@@ -232,6 +232,89 @@ export namespace appshell {
 
 export namespace contracts {
 
+	export class CallCancelInput {
+	    sessionId: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CallCancelInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sessionId = source["sessionId"];
+	    }
+	}
+	export class ErrorEnvelope {
+	    code: string;
+	    category: string;
+	    message: string;
+	    details?: Record<string, string>;
+
+	    static createFrom(source: any = {}) {
+	        return new ErrorEnvelope(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.category = source["category"];
+	        this.message = source["message"];
+	        this.details = source["details"];
+	    }
+	}
+	export class CallCancelResult {
+	    callId: string;
+	    sessionId: string;
+	    state: string;
+	    requestedAt: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CallCancelResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.callId = source["callId"];
+	        this.sessionId = source["sessionId"];
+	        this.state = source["state"];
+	        this.requestedAt = source["requestedAt"];
+	    }
+	}
+	export class CallCancelResponse {
+	    ok: boolean;
+	    data?: CallCancelResult;
+	    error?: ErrorEnvelope;
+
+	    static createFrom(source: any = {}) {
+	        return new CallCancelResponse(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], CallCancelResult);
+	        this.error = this.convertValues(source["error"], ErrorEnvelope);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
 	export class CallOptions {
 	    requestTimeoutMs?: number;
 	    streamIdleTimeoutMs?: number;
@@ -287,24 +370,6 @@ export namespace contracts {
 		    }
 		    return a;
 		}
-	}
-	export class ErrorEnvelope {
-	    code: string;
-	    category: string;
-	    message: string;
-	    details?: Record<string, string>;
-
-	    static createFrom(source: any = {}) {
-	        return new ErrorEnvelope(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.code = source["code"];
-	        this.category = source["category"];
-	        this.message = source["message"];
-	        this.details = source["details"];
-	    }
 	}
 	export class DiagnosticsUpdateEvent {
 	    id: string;
@@ -441,6 +506,153 @@ export namespace contracts {
 		}
 	}
 
+
+	export class StreamMessage {
+	    body: any;
+
+	    static createFrom(source: any = {}) {
+	        return new StreamMessage(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.body = source["body"];
+	    }
+	}
+	export class StreamRequestSpec {
+	    mode: string;
+	    messages?: StreamMessage[];
+
+	    static createFrom(source: any = {}) {
+	        return new StreamRequestSpec(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.messages = this.convertValues(source["messages"], StreamMessage);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class CallStartStreamInput {
+	    catalogSource?: string;
+	    endpointId: string;
+	    method: string;
+	    rpcType: string;
+	    environmentRef?: string;
+	    metadata?: Record<string, string>;
+	    requestSpec?: StreamRequestSpec;
+	    callOptions?: CallOptions;
+
+	    static createFrom(source: any = {}) {
+	        return new CallStartStreamInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.catalogSource = source["catalogSource"];
+	        this.endpointId = source["endpointId"];
+	        this.method = source["method"];
+	        this.rpcType = source["rpcType"];
+	        this.environmentRef = source["environmentRef"];
+	        this.metadata = source["metadata"];
+	        this.requestSpec = this.convertValues(source["requestSpec"], StreamRequestSpec);
+	        this.callOptions = this.convertValues(source["callOptions"], CallOptions);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class CallStartStreamResult {
+	    callId: string;
+	    sessionId: string;
+	    endpointId: string;
+	    method: string;
+	    rpcType: string;
+	    state: string;
+	    startedAt: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CallStartStreamResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.callId = source["callId"];
+	        this.sessionId = source["sessionId"];
+	        this.endpointId = source["endpointId"];
+	        this.method = source["method"];
+	        this.rpcType = source["rpcType"];
+	        this.state = source["state"];
+	        this.startedAt = source["startedAt"];
+	    }
+	}
+	export class CallStartStreamResponse {
+	    ok: boolean;
+	    data?: CallStartStreamResult;
+	    error?: ErrorEnvelope;
+
+	    static createFrom(source: any = {}) {
+	        return new CallStartStreamResponse(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.data = this.convertValues(source["data"], CallStartStreamResult);
+	        this.error = this.convertValues(source["error"], ErrorEnvelope);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 	export class ProtoSource {
 	    type: string;
@@ -1337,18 +1549,6 @@ export namespace contracts {
 
 
 
-	export class StreamMessage {
-	    body: any;
-
-	    static createFrom(source: any = {}) {
-	        return new StreamMessage(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.body = source["body"];
-	    }
-	}
 	export class SavedRequestSpec {
 	    mode: string;
 	    body?: any;
@@ -1561,6 +1761,7 @@ export namespace contracts {
 		    return a;
 		}
 	}
+
 
 
 

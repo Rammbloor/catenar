@@ -521,7 +521,8 @@ button {
 }
 
 .history-list,
-.history-events {
+.history-events,
+.stream-timeline {
   display: grid;
   gap: 10px;
 }

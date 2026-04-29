@@ -183,6 +183,35 @@ type CallInvokeUnaryResponse struct {
 	Error *ErrorEnvelope         `json:"error,omitempty"`
 }
 
+type CallStartStreamResult struct {
+	CallID     string      `json:"callId"`
+	SessionID  string      `json:"sessionId"`
+	EndpointID string      `json:"endpointId"`
+	Method     string      `json:"method"`
+	RPCType    RPCType     `json:"rpcType"`
+	State      StreamState `json:"state"`
+	StartedAt  string      `json:"startedAt"`
+}
+
+type CallStartStreamResponse struct {
+	Ok    bool                   `json:"ok"`
+	Data  *CallStartStreamResult `json:"data,omitempty"`
+	Error *ErrorEnvelope         `json:"error,omitempty"`
+}
+
+type CallCancelResult struct {
+	CallID      string      `json:"callId"`
+	SessionID   string      `json:"sessionId"`
+	State       StreamState `json:"state"`
+	RequestedAt string      `json:"requestedAt"`
+}
+
+type CallCancelResponse struct {
+	Ok    bool              `json:"ok"`
+	Data  *CallCancelResult `json:"data,omitempty"`
+	Error *ErrorEnvelope    `json:"error,omitempty"`
+}
+
 type HistoryListInput struct {
 	Limit int `json:"limit,omitempty"`
 }

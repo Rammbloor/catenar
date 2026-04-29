@@ -10,6 +10,8 @@
     AppOverlay,
     AppView,
     DiagnosticsUpdateEvent,
+    StreamCompletedEvent,
+    StreamStateEvent,
   } from './lib/contracts'
   import { createAppShellStore } from './lib/state/app-shell'
   import { emitDiagnosticsProbe, fetchBootstrap } from './lib/wails/backend'
@@ -45,6 +47,14 @@
     EventsOn('diagnostics:update', (payload: DiagnosticsUpdateEvent) => {
       shell.applyDiagnosticsEvent(payload)
     })
+    EventsOn('stream:state', (payload: StreamStateEvent) => {
+      shell.setStreamState(payload.state)
+      shell.setStreamConditions(payload.conditions)
+    })
+    EventsOn('stream:completed', (payload: StreamCompletedEvent) => {
+      shell.setStreamState(payload.finalState)
+      shell.setStreamConditions(payload.conditions)
+    })
 
     void (async () => {
       try {
@@ -58,7 +68,7 @@
     })()
 
     return () => {
-      EventsOff('diagnostics:update')
+      EventsOff('diagnostics:update', 'stream:state', 'stream:completed')
     }
   })
 </script>

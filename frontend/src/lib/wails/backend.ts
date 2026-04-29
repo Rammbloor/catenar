@@ -13,6 +13,12 @@ import type {
   CallInvokeUnaryInput,
   CallInvokeUnaryResponse,
   CallInvokeUnaryResult,
+  CallStartStreamInput,
+  CallStartStreamResponse,
+  CallStartStreamResult,
+  CallCancelInput,
+  CallCancelResponse,
+  CallCancelResult,
   HistoryListInput,
   HistoryListResponse,
   HistoryListResult,
@@ -33,7 +39,9 @@ import type {
   WorkspaceValidateResult,
 } from '../contracts'
 import {
+  CallCancel,
   CallInvokeUnary,
+  CallStartStream,
   CatalogLoadFromReflection,
   CatalogLoadFromProtoSources,
   EndpointTest,
@@ -147,6 +155,16 @@ export async function loadCatalogFromProtoSources(input: CatalogLoadFromProtoSou
 export async function invokeUnary(input: CallInvokeUnaryInput): Promise<CallInvokeUnaryResult> {
   const response = (await CallInvokeUnary(input as Parameters<typeof CallInvokeUnary>[0])) as CallInvokeUnaryResponse
   return unwrapResponse(response) as CallInvokeUnaryResult
+}
+
+export async function startStream(input: CallStartStreamInput): Promise<CallStartStreamResult> {
+  const response = (await CallStartStream(input as Parameters<typeof CallStartStream>[0])) as CallStartStreamResponse
+  return unwrapResponse(response) as CallStartStreamResult
+}
+
+export async function cancelStream(input: CallCancelInput): Promise<CallCancelResult> {
+  const response = (await CallCancel(input as Parameters<typeof CallCancel>[0])) as CallCancelResponse
+  return unwrapResponse(response) as CallCancelResult
 }
 
 export async function listHistory(input: HistoryListInput): Promise<HistoryListResult> {

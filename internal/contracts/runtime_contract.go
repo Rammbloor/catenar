@@ -197,6 +197,7 @@ type CallInvokeUnaryInput struct {
 }
 
 type CallStartStreamInput struct {
+	CatalogSource  CatalogSourceKind  `json:"catalogSource,omitempty"`
 	EndpointID     string             `json:"endpointId"`
 	Method         string             `json:"method"`
 	RPCType        RPCType            `json:"rpcType"`

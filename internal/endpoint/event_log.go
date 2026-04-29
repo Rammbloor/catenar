@@ -29,6 +29,11 @@ type UnaryEventLogArtifacts struct {
 	Events         []contracts.HistoryLogEvent
 }
 
+type StreamEventLogArtifacts struct {
+	SummaryPath    string
+	SessionLogPath string
+}
+
 type UnaryEventLogRecord struct {
 	CallID          string
 	SessionID       string
@@ -59,8 +64,19 @@ type storedUnaryHistoryDetail struct {
 	Events       []contracts.HistoryLogEvent `json:"events"`
 }
 
+type StreamEventLogRecord struct {
+	CallID         string
+	RequestBody    any
+	ResponseBodies []any
+	Headers        map[string][]string
+	Trailers       map[string][]string
+	Status         contracts.StreamStatus
+	Events         []contracts.HistoryLogEvent
+}
+
 type EventLog interface {
 	WriteUnaryCall(ctx context.Context, record UnaryEventLogRecord) (UnaryEventLogArtifacts, error)
+	WriteStreamCall(ctx context.Context, record StreamEventLogRecord) (StreamEventLogArtifacts, error)
 }
 
 type fileEventLog struct {
@@ -102,6 +118,38 @@ func (l *fileEventLog) WriteUnaryCall(_ context.Context, record UnaryEventLogRec
 		SummaryPath:    summaryPath,
 		SessionLogPath: sessionLogPath,
 		Events:         events,
+	}, nil
+}
+
+func (l *fileEventLog) WriteStreamCall(_ context.Context, record StreamEventLogRecord) (StreamEventLogArtifacts, error) {
+	if err := os.MkdirAll(filepath.Join(l.baseDir, "session-logs"), 0o755); err != nil {
+		return StreamEventLogArtifacts{}, err
+	}
+	if err := os.MkdirAll(filepath.Join(l.baseDir, "summaries"), 0o755); err != nil {
+		return StreamEventLogArtifacts{}, err
+	}
+
+	sessionLogPath := filepath.Join(l.baseDir, "session-logs", record.CallID+".jsonl")
+	if err := writeHistoryEvents(sessionLogPath, record.Events); err != nil {
+		return StreamEventLogArtifacts{}, err
+	}
+
+	summaryPath := filepath.Join(l.baseDir, "summaries", record.CallID+".json")
+	summaryPayload := storedUnaryHistoryDetail{
+		RequestBody:  record.RequestBody,
+		ResponseBody: record.ResponseBodies,
+		Headers:      redactMetadataValues(record.Headers),
+		Trailers:     redactMetadataValues(record.Trailers),
+		Status:       record.Status,
+		Events:       record.Events,
+	}
+	if err := writeJSONFile(summaryPath, summaryPayload); err != nil {
+		return StreamEventLogArtifacts{}, err
+	}
+
+	return StreamEventLogArtifacts{
+		SummaryPath:    summaryPath,
+		SessionLogPath: sessionLogPath,
 	}, nil
 }
 

@@ -202,15 +202,24 @@ func TestCatalogLoadFromReflectionCustomCASuccess(t *testing.T) {
 }
 
 type reflectionCatalogServerOptions struct {
-	disableReflection bool
-	serverTLS         *tls.Config
+	disableReflection     bool
+	serverTLS             *tls.Config
+	watchMessages         []int64
+	watchBlockUntilCancel bool
+	watchStatusCode       codes.Code
+	watchStatusMessage    string
 }
 
 type reflectionDemoMarker interface {
 	isReflectionDemo()
 }
 
-type reflectionDemoService struct{}
+type reflectionDemoService struct {
+	watchMessages         []int64
+	watchBlockUntilCancel bool
+	watchStatusCode       codes.Code
+	watchStatusMessage    string
+}
 
 func (reflectionDemoService) isReflectionDemo() {}
 
@@ -253,13 +262,46 @@ var reflectionDemoServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Watch",
 			ServerStreams: true,
-			Handler: func(_ any, stream grpc.ServerStream) error {
+			Handler: func(service any, stream grpc.ServerStream) error {
 				request := &emptypb.Empty{}
 				if err := stream.RecvMsg(request); err != nil {
 					return err
 				}
 
-				return stream.SendMsg(&timestamppb.Timestamp{Seconds: 1})
+				demoService, _ := service.(reflectionDemoService)
+				if err := grpc.SetHeader(stream.Context(), metadata.Pairs(
+					"x-reflection-demo", "watch",
+					"set-cookie", "stream=stream-cookie-secret",
+				)); err != nil {
+					return err
+				}
+				if err := grpc.SetTrailer(stream.Context(), metadata.Pairs(
+					"x-reflection-demo-trailer", "stream-ok",
+					"set-cookie", "stream-refresh=stream-cookie-secret",
+				)); err != nil {
+					return err
+				}
+
+				if demoService.watchStatusCode != codes.OK {
+					return status.Error(demoService.watchStatusCode, demoService.watchStatusMessage)
+				}
+
+				if demoService.watchBlockUntilCancel {
+					<-stream.Context().Done()
+					return stream.Context().Err()
+				}
+
+				messages := demoService.watchMessages
+				if len(messages) == 0 {
+					messages = []int64{1}
+				}
+				for _, seconds := range messages {
+					if err := stream.SendMsg(&timestamppb.Timestamp{Seconds: seconds}); err != nil {
+						return err
+					}
+				}
+
+				return nil
 			},
 		},
 	},
@@ -279,7 +321,12 @@ func startReflectionCatalogServer(t *testing.T, options reflectionCatalogServerO
 	}
 
 	server := grpc.NewServer(serverOptions...)
-	server.RegisterService(&reflectionDemoServiceDesc, reflectionDemoService{})
+	server.RegisterService(&reflectionDemoServiceDesc, reflectionDemoService{
+		watchMessages:         append([]int64(nil), options.watchMessages...),
+		watchBlockUntilCancel: options.watchBlockUntilCancel,
+		watchStatusCode:       options.watchStatusCode,
+		watchStatusMessage:    options.watchStatusMessage,
+	})
 
 	if !options.disableReflection {
 		resolver := buildReflectionCatalogResolver(t)

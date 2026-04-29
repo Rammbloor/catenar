@@ -3,7 +3,11 @@
 import {contracts} from '../models';
 import {appshell} from '../models';
 
+export function CallCancel(arg1:contracts.CallCancelInput):Promise<contracts.CallCancelResponse>;
+
 export function CallInvokeUnary(arg1:contracts.CallInvokeUnaryInput):Promise<contracts.CallInvokeUnaryResponse>;
+
+export function CallStartStream(arg1:contracts.CallStartStreamInput):Promise<contracts.CallStartStreamResponse>;
 
 export function CatalogLoadFromProtoSources(arg1:contracts.CatalogLoadFromProtoSourcesInput):Promise<contracts.CatalogLoadFromProtoSourcesResponse>;
 

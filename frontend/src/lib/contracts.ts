@@ -62,6 +62,7 @@ export const TERMINAL_STREAM_STATES = ['closed', 'cancelled', 'error'] as const
 export const SESSION_CONDITIONS = ['truncated'] as const
 export const RPC_TYPES = ['unary', 'server_stream', 'client_stream', 'bidi_stream'] as const
 export const CATALOG_SOURCES = ['reflection', 'proto'] as const
+export const REQUEST_MODES = ['static-sequence', 'interactive'] as const
 export const PROTO_SOURCE_TYPES = ['directory', 'file'] as const
 export const TLS_MODES = ['plaintext', 'system_ca', 'custom_ca', 'mtls'] as const
 export const ENDPOINT_CHECK_STAGES = [
@@ -82,6 +83,7 @@ export type TerminalStreamState = (typeof TERMINAL_STREAM_STATES)[number]
 export type SessionCondition = (typeof SESSION_CONDITIONS)[number]
 export type RPCType = (typeof RPC_TYPES)[number]
 export type CatalogSourceKind = (typeof CATALOG_SOURCES)[number]
+export type RequestMode = (typeof REQUEST_MODES)[number]
 export type ProtoSourceType = (typeof PROTO_SOURCE_TYPES)[number]
 export type TLSMode = (typeof TLS_MODES)[number]
 export type EndpointCheckStage = (typeof ENDPOINT_CHECK_STAGES)[number]
@@ -101,6 +103,55 @@ export interface StreamMessage {
 export interface StreamStatus {
   code: string
   message: string
+}
+
+export interface StreamStateEvent {
+  sessionId: string
+  callId: string
+  state: StreamState
+  previousState?: StreamState
+  conditions: SessionCondition[]
+  ts: string
+}
+
+export interface StreamEventPreview {
+  json?: JsonValue
+}
+
+export interface StreamEventPayload {
+  preview: StreamEventPreview
+  sizeBytes?: number
+}
+
+export interface StreamEventRecord {
+  sessionId: string
+  callId: string
+  seq: number
+  kind: string
+  direction: string
+  ts: string
+  payload: StreamEventPayload
+}
+
+export interface StreamErrorEvent {
+  sessionId: string
+  callId: string
+  error: ErrorEnvelope
+  ts: string
+}
+
+export interface StreamCompletedEvent {
+  sessionId: string
+  callId: string
+  finalState: StreamState
+  conditions: SessionCondition[]
+  status: StreamStatus
+  ts: string
+}
+
+export interface StreamRequestSpec {
+  mode: RequestMode
+  messages?: StreamMessage[]
 }
 
 export interface TransitionRule {
@@ -468,6 +519,50 @@ export interface CallInvokeUnaryResult {
 export interface CallInvokeUnaryResponse {
   ok: boolean
   data?: CallInvokeUnaryResult
+  error?: ErrorEnvelope
+}
+
+export interface CallStartStreamInput {
+  catalogSource?: CatalogSourceKind
+  endpointId: string
+  method: string
+  rpcType: RPCType
+  environmentRef?: string
+  metadata?: Record<string, string>
+  requestSpec?: StreamRequestSpec
+  callOptions?: CallOptions
+}
+
+export interface CallStartStreamResult {
+  callId: string
+  sessionId: string
+  endpointId: string
+  method: string
+  rpcType: RPCType
+  state: StreamState
+  startedAt: string
+}
+
+export interface CallStartStreamResponse {
+  ok: boolean
+  data?: CallStartStreamResult
+  error?: ErrorEnvelope
+}
+
+export interface CallCancelInput {
+  sessionId: string
+}
+
+export interface CallCancelResult {
+  callId: string
+  sessionId: string
+  state: StreamState
+  requestedAt: string
+}
+
+export interface CallCancelResponse {
+  ok: boolean
+  data?: CallCancelResult
   error?: ErrorEnvelope
 }
 

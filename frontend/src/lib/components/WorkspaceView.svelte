@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { EventsOn } from '../../../wailsjs/runtime/runtime'
   import type {
     BootstrapData,
     CatalogSourceKind,
     CallInvokeUnaryResult,
+    CallStartStreamResult,
     CatalogMethod,
     EndpointPreset,
     EndpointTestResult,
@@ -13,6 +15,11 @@
     ProtoCatalogResult,
     ReflectionCatalogResult,
     RequestSaveResult,
+    StreamCompletedEvent,
+    StreamErrorEvent,
+    StreamEventRecord,
+    StreamState,
+    StreamStateEvent,
     TLSMode,
     WorkspaceSnapshot,
     WorkspaceValidationIssue,
@@ -20,6 +27,7 @@
   import { getDiagnosticContextRows } from '../diagnostics'
   import {
     BackendResponseError,
+    cancelStream,
     createWorkspace,
     getHistory,
     invokeUnary,
@@ -29,6 +37,7 @@
     openWorkspace,
     saveRequest,
     saveWorkspace,
+    startStream,
     testEndpoint,
     validateWorkspace,
   } from '../wails/backend'
@@ -67,6 +76,11 @@
   let activeCatalog: ActiveCatalog | null = null
   let selectedMethod: CatalogMethod | null = null
   let invokeResult: CallInvokeUnaryResult | null = null
+  let streamStartResult: CallStartStreamResult | null = null
+  let streamState: StreamState = 'idle'
+  let streamEvents: StreamEventRecord[] = []
+  let streamError: StreamErrorEvent | null = null
+  let streamCompleted: StreamCompletedEvent | null = null
   let historySummaries: HistoryCallSummary[] = []
   let historyDetail: HistoryGetResult | null = null
   let activeWorkspace: WorkspaceSnapshot | null = null
@@ -89,6 +103,8 @@
   let reflectionPending = false
   let protoPending = false
   let invokePending = false
+  let streamPending = false
+  let cancelPending = false
   let historyPending = false
   let historyDetailPending = false
   let workspacePending = false
@@ -103,6 +119,47 @@
 
   onMount(() => {
     void refreshHistory()
+
+    const offState = EventsOn('stream:state', (payload: StreamStateEvent) => {
+      if (!acceptStreamEvent(payload.sessionId)) {
+        return
+      }
+      streamState = payload.state
+    })
+    const offEvent = EventsOn('stream:event', (payload: StreamEventRecord) => {
+      if (!acceptStreamEvent(payload.sessionId)) {
+        return
+      }
+      streamEvents = [...streamEvents, payload].sort((left, right) => left.seq - right.seq)
+    })
+    const offError = EventsOn('stream:error', (payload: StreamErrorEvent) => {
+      if (!acceptStreamEvent(payload.sessionId)) {
+        return
+      }
+      streamError = payload
+      actionError = payload.error.message
+      actionErrorDetails = payload.error.details
+    })
+    const offCompleted = EventsOn('stream:completed', (payload: StreamCompletedEvent) => {
+      if (!acceptStreamEvent(payload.sessionId)) {
+        return
+      }
+      streamCompleted = payload
+      streamState = payload.finalState
+      infoMessage =
+        payload.finalState === 'closed'
+          ? `Server stream saved to history as ${payload.callId}.`
+          : `Server stream finished as ${payload.finalState} with ${payload.status.code}.`
+      void refreshHistory()
+      void loadHistoryDetail(payload.callId)
+    })
+
+    return () => {
+      offState()
+      offEvent()
+      offError()
+      offCompleted()
+    }
   })
 
   $: actionErrorContextRows = getDiagnosticContextRows(actionErrorDetails)
@@ -206,6 +263,7 @@
       activeCatalog = null
       selectedMethod = null
       invokeResult = null
+      clearStreamView()
       historyDetail = null
       selectedHistoryCallId = ''
       actionError = ''
@@ -256,6 +314,7 @@
   function selectMethod(method: CatalogMethod): void {
     selectedMethod = method
     invokeResult = null
+    clearStreamView()
     actionError = ''
     actionErrorDetails = undefined
     infoMessage = ''
@@ -562,6 +621,7 @@
     clearActionError()
     infoMessage = ''
     invokeResult = null
+    clearStreamView()
 
     if (selectedMethod.rpcType !== 'unary') {
       actionError = 'This invoke surface is still unary-only. Pick a unary method from the catalog.'
@@ -595,6 +655,73 @@
       await refreshHistory()
     } finally {
       invokePending = false
+    }
+  }
+
+  async function runServerStreamInvoke(): Promise<void> {
+    if (!activeCatalog || !selectedMethod) {
+      actionError = 'Select a method from the loaded catalog before starting a stream.'
+      actionErrorDetails = undefined
+      return
+    }
+
+    clearActionError()
+    infoMessage = ''
+    invokeResult = null
+    clearStreamView()
+
+    if (selectedMethod.rpcType !== 'server_stream') {
+      actionError = 'Slice 3.1 can start server-streaming methods only.'
+      actionErrorDetails = undefined
+      return
+    }
+
+    const body = parseBodyText()
+    const metadata = parseMetadataText()
+    if (body === null || metadata === null) {
+      return
+    }
+
+    streamPending = true
+    try {
+      const started = await startStream({
+        catalogSource: activeCatalog.kind,
+        endpointId: activeCatalog.endpoint.id ?? '',
+        method: selectedMethod.fullName,
+        rpcType: selectedMethod.rpcType,
+        metadata,
+        requestSpec: {
+          mode: 'static-sequence',
+          messages: [{ body }],
+        },
+      })
+      streamStartResult = started
+      if (!streamCompleted || streamCompleted.sessionId !== started.sessionId) {
+        streamState = started.state
+        infoMessage = `Server stream started as ${started.callId}.`
+      }
+    } catch (error) {
+      setActionError(error, 'Server stream could not be started.')
+      await refreshHistory()
+    } finally {
+      streamPending = false
+    }
+  }
+
+  async function runStreamCancel(): Promise<void> {
+    if (!streamStartResult || isTerminalState(streamState)) {
+      return
+    }
+
+    clearActionError()
+    cancelPending = true
+    try {
+      await cancelStream({ sessionId: streamStartResult.sessionId })
+      infoMessage = `Cancel requested for ${streamStartResult.callId}.`
+    } catch (error) {
+      setActionError(error, 'Stream could not be cancelled.')
+    } finally {
+      cancelPending = false
     }
   }
 
@@ -650,6 +777,10 @@
   function handleComposerKeydown(event: KeyboardEvent): void {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault()
+      if (selectedMethod?.rpcType === 'server_stream') {
+        void runServerStreamInvoke()
+        return
+      }
       void runUnaryInvoke()
     }
   }
@@ -677,15 +808,34 @@
   function isSelectedHistory(callId: string): boolean {
     return selectedHistoryCallId === callId
   }
+
+  function clearStreamView(): void {
+    streamStartResult = null
+    streamState = 'idle'
+    streamEvents = []
+    streamError = null
+    streamCompleted = null
+  }
+
+  function acceptStreamEvent(sessionId: string): boolean {
+    return streamStartResult?.sessionId === sessionId || (streamPending && streamStartResult === null)
+  }
+
+  function isTerminalState(state: StreamState): boolean {
+    return state === 'closed' || state === 'cancelled' || state === 'error'
+  }
+
+  function formatStreamEventPreview(event: StreamEventRecord): string {
+    return formatJsonValue(event.payload.preview.json)
+  }
 </script>
 
 <section class="panel">
   <div class="stack">
-    <p class="eyebrow">Slice 2.2</p>
-    <h2 class="section-title">Workspace persistence v1</h2>
+    <p class="eyebrow">Slice 3.1</p>
+    <h2 class="section-title">Server streaming</h2>
     <p class="section-copy">
-      Reflection, proto inputs, reusable unary requests and endpoint presets now round-trip through the
-      file-backed workspace manifest.
+      Reflection and proto-loaded server-streaming methods now use the live event bus, timeline and persisted history artifacts.
     </p>
   </div>
 
@@ -939,12 +1089,12 @@
 
       <div class="card stack">
         <div class="card__header">
-          <h3>Recent unary history</h3>
+          <h3>Recent call history</h3>
           <span class="pill">{historyPending ? 'refreshing…' : `${historySummaries.length} calls`}</span>
         </div>
 
         {#if historySummaries.length === 0}
-          <div class="empty-state">Completed unary calls will materialize here with persisted summaries and session log artifacts.</div>
+          <div class="empty-state">Completed calls will materialize here with persisted summaries and session log artifacts.</div>
         {:else}
           <div class="history-list">
             {#each historySummaries as summary}
@@ -1025,10 +1175,10 @@
 
       {#if !selectedMethod}
         <div class="empty-state">Pick a method from the loaded catalog to materialize the starter JSON payload.</div>
-      {:else if selectedMethod.rpcType !== 'unary'}
+      {:else if selectedMethod.rpcType !== 'unary' && selectedMethod.rpcType !== 'server_stream'}
         <div class="empty-state">
           <strong>{selectedMethod.name}</strong> is {formatRpcType(selectedMethod.rpcType)}.
-          <div class="subtle">Slice 2.1 still keeps the invoke surface unary-only before widening into streaming layouts.</div>
+          <div class="subtle">Slice 3.1 supports unary and server-streaming methods before widening into client and bidi streaming.</div>
         </div>
       {:else}
         <div class="stack">
@@ -1080,15 +1230,32 @@
 
           <div class="pill-row">
             <button class="ghost-button" on:click={() => selectedMethod && restoreTemplateDraft(selectedMethod)}>Reset to template</button>
-            <button class="ghost-button" disabled={requestSavePending || !activeWorkspace} on:click={runRequestSave}>
-              {requestSavePending ? 'Saving request…' : 'Save request'}
-            </button>
-            <button class="action-button" disabled={invokePending || reflectionPending || protoPending} on:click={runUnaryInvoke}>
-              {invokePending ? 'Invoking unary call…' : 'Invoke unary call'}
-            </button>
+            {#if selectedMethod.rpcType === 'unary'}
+              <button class="ghost-button" disabled={requestSavePending || !activeWorkspace} on:click={runRequestSave}>
+                {requestSavePending ? 'Saving request…' : 'Save request'}
+              </button>
+              <button class="action-button" disabled={invokePending || reflectionPending || protoPending} on:click={runUnaryInvoke}>
+                {invokePending ? 'Invoking unary call…' : 'Invoke unary call'}
+              </button>
+            {:else}
+              <button
+                class="action-button"
+                disabled={streamPending || reflectionPending || protoPending || (streamStartResult !== null && !isTerminalState(streamState))}
+                on:click={runServerStreamInvoke}
+              >
+                {streamPending ? 'Starting stream…' : 'Start server stream'}
+              </button>
+              <button
+                class="ghost-button"
+                disabled={cancelPending || !streamStartResult || isTerminalState(streamState)}
+                on:click={runStreamCancel}
+              >
+                {cancelPending ? 'Cancelling…' : 'Cancel stream'}
+              </button>
+            {/if}
           </div>
 
-          <div class="subtle">Use <strong>Cmd/Ctrl+Enter</strong> inside the editors to invoke the selected unary method.</div>
+          <div class="subtle">Use <strong>Cmd/Ctrl+Enter</strong> inside the editors to run the selected unary or server-streaming method.</div>
         </div>
       {/if}
     </div>
@@ -1101,8 +1268,43 @@
         {/if}
       </div>
 
-      {#if !invokeResult}
-        <div class="empty-state">Headers, status, trailers and body appear here after a unary invocation completes.</div>
+      {#if streamStartResult}
+        <div class="pill-row">
+          <span class="pill" class:pill--accent={streamState === 'open'}>{streamState}</span>
+          <span class="pill">{streamStartResult.callId}</span>
+          {#if streamCompleted}
+            <span class:badge--warning={streamCompleted.status.code !== 'OK'} class="badge">{streamCompleted.status.code}</span>
+          {/if}
+        </div>
+
+        {#if streamError}
+          <article class="diagnostic-item">
+            <div class="diagnostic-item__head">
+              <strong>{streamError.error.code}</strong>
+              <span class="diagnostic-item__meta">{streamError.error.category}</span>
+            </div>
+            <div>{streamError.error.message}</div>
+          </article>
+        {/if}
+
+        <div class="stream-timeline">
+          {#if streamEvents.length === 0}
+            <div class="empty-state">Live stream events will append here as headers, messages and trailers arrive.</div>
+          {:else}
+            {#each streamEvents as event}
+              <article class="history-event">
+                <div class="diagnostic-item__head">
+                  <strong>{event.kind}</strong>
+                  <span class="diagnostic-item__meta">#{event.seq} {event.direction}</span>
+                </div>
+                <span>{formatTimestamp(event.ts)}</span>
+                <pre class="code-block">{formatStreamEventPreview(event)}</pre>
+              </article>
+            {/each}
+          {/if}
+        </div>
+      {:else if !invokeResult}
+        <div class="empty-state">Headers, status, trailers, unary body and streaming timeline events appear here after invocation starts.</div>
       {:else}
         <div class="pill-row">
           <span class="pill pill--accent">{invokeResult.finalState}</span>

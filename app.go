@@ -150,6 +150,44 @@ func (a *App) CallInvokeUnary(input contracts.CallInvokeUnaryInput) contracts.Ca
 	return a.endpoint.CallInvokeUnary(a.ctx, input)
 }
 
+// CallStartStream starts a server-streaming RPC and emits live session updates through the event bus.
+func (a *App) CallStartStream(input contracts.CallStartStreamInput) contracts.CallStartStreamResponse {
+	if a.ctx == nil {
+		return contracts.CallStartStreamResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.runtime_not_ready",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The Wails runtime context is not ready yet.",
+				Details: map[string]string{
+					"expectedHook": "startup",
+				},
+			},
+		}
+	}
+
+	return a.endpoint.CallStartStream(a.ctx, input)
+}
+
+// CallCancel requests cancellation for the active live stream session.
+func (a *App) CallCancel(input contracts.CallCancelInput) contracts.CallCancelResponse {
+	if a.ctx == nil {
+		return contracts.CallCancelResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.runtime_not_ready",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The Wails runtime context is not ready yet.",
+				Details: map[string]string{
+					"expectedHook": "startup",
+				},
+			},
+		}
+	}
+
+	return a.endpoint.CallCancel(a.ctx, input)
+}
+
 // HistoryList returns recent persisted unary call summaries from the local history store.
 func (a *App) HistoryList(input contracts.HistoryListInput) contracts.HistoryListResponse {
 	if a.ctx == nil {

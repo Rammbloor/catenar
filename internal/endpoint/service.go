@@ -92,6 +92,8 @@ type GRPCClientConn interface {
 type GRPCRuntime interface {
 	Dial(ctx context.Context, cfg EndpointRuntimeConfig) (GRPCClientConn, *endpointDiagnostic)
 	InvokeUnary(ctx context.Context, conn GRPCClientConn, request UnaryInvokeRequest) (UnaryInvokeResult, *endpointDiagnostic)
+	StartServerStream(ctx context.Context, conn GRPCClientConn, request ServerStreamStartRequest) (ServerStreamStartResult, *endpointDiagnostic)
+	ConsumeServerStream(request ServerStreamConsumeRequest) (ServerStreamConsumeResult, *endpointDiagnostic)
 }
 
 type MethodCatalog struct {
@@ -143,6 +145,8 @@ type Service struct {
 	emitter           EventEmitter
 	catalogCacheMu    sync.RWMutex
 	catalogCache      map[string]cachedMethodCatalog
+	streamSessionsMu  sync.Mutex
+	streamSessions    map[string]*activeStreamSession
 	initializationErr error
 	now               func() time.Time
 }
@@ -214,6 +218,7 @@ func NewService(deps ServiceDependencies) *Service {
 		historyStore:      historyStore,
 		eventLog:          eventLog,
 		catalogCache:      make(map[string]cachedMethodCatalog),
+		streamSessions:    make(map[string]*activeStreamSession),
 		initializationErr: initializationErr,
 		now:               now,
 	}
