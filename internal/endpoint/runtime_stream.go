@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -19,11 +20,10 @@ import (
 )
 
 type ServerStreamStartRequest struct {
-	Method         contracts.CatalogMethod
-	Descriptor     protoreflect.MethodDescriptor
-	Metadata       map[string]string
-	Body           any
-	RequestTimeout time.Duration
+	Method     contracts.CatalogMethod
+	Descriptor protoreflect.MethodDescriptor
+	Metadata   map[string]string
+	Body       any
 }
 
 type ServerStreamStartResult struct {
@@ -39,11 +39,13 @@ type ServerStreamMessage struct {
 }
 
 type ServerStreamConsumeRequest struct {
-	Method     contracts.CatalogMethod
-	Descriptor protoreflect.MethodDescriptor
-	Stream     grpc.ClientStream
-	OnHeaders  func(map[string][]string, time.Time)
-	OnMessage  func(ServerStreamMessage)
+	Method      contracts.CatalogMethod
+	Descriptor  protoreflect.MethodDescriptor
+	Stream      grpc.ClientStream
+	Cancel      context.CancelFunc
+	IdleTimeout time.Duration
+	OnHeaders   func(map[string][]string, time.Time)
+	OnMessage   func(ServerStreamMessage)
 }
 
 type ServerStreamConsumeResult struct {
@@ -61,13 +63,7 @@ func (r *grpcRuntime) StartServerStream(ctx context.Context, conn GRPCClientConn
 		return ServerStreamStartResult{}, requestDiagnostic
 	}
 
-	callCtx := ctx
-	var cancel context.CancelFunc = func() {}
-	if request.RequestTimeout > 0 {
-		callCtx, cancel = context.WithTimeout(callCtx, request.RequestTimeout)
-	} else {
-		callCtx, cancel = context.WithCancel(callCtx)
-	}
+	callCtx, cancel := context.WithCancel(ctx)
 
 	if len(request.Metadata) > 0 {
 		callCtx = metadata.NewOutgoingContext(callCtx, metadata.New(request.Metadata))
@@ -100,15 +96,24 @@ func (r *grpcRuntime) StartServerStream(ctx context.Context, conn GRPCClientConn
 }
 
 func (r *grpcRuntime) ConsumeServerStream(request ServerStreamConsumeRequest) (ServerStreamConsumeResult, *endpointDiagnostic) {
+	idleMonitor := newServerStreamIdleMonitor(request.IdleTimeout, request.Cancel)
+	defer idleMonitor.Stop()
+
 	headers, headerErr := request.Stream.Header()
 	if headerErr != nil {
-		return serverStreamErrorResult(request.Stream, nil, headerErr), classifyServerStreamError(request.Method, headerErr)
+		result := serverStreamErrorResult(request.Stream, nil, headerErr)
+		if idleMonitor.TimedOut() {
+			result.Status = streamIdleTimeoutStatus(request.IdleTimeout)
+			return result, classifyServerStreamIdleTimeout(request.Method, request.IdleTimeout)
+		}
+		return result, classifyServerStreamError(request.Method, headerErr)
 	}
 
 	clonedHeaders := cloneMetadataValues(headers)
 	if request.OnHeaders != nil && len(clonedHeaders) > 0 {
 		request.OnHeaders(clonedHeaders, time.Now().UTC())
 	}
+	idleMonitor.Reset()
 
 	messages := make([]ServerStreamMessage, 0)
 	for {
@@ -129,6 +134,10 @@ func (r *grpcRuntime) ConsumeServerStream(request ServerStreamConsumeRequest) (S
 			result := serverStreamErrorResult(request.Stream, clonedHeaders, err)
 			result.Messages = messages
 			result.ResponseCount = len(messages)
+			if idleMonitor.TimedOut() {
+				result.Status = streamIdleTimeoutStatus(request.IdleTimeout)
+				return result, classifyServerStreamIdleTimeout(request.Method, request.IdleTimeout)
+			}
 			return result, classifyServerStreamError(request.Method, err)
 		}
 
@@ -153,7 +162,53 @@ func (r *grpcRuntime) ConsumeServerStream(request ServerStreamConsumeRequest) (S
 		if request.OnMessage != nil {
 			request.OnMessage(message)
 		}
+		idleMonitor.Reset()
 	}
+}
+
+type serverStreamIdleMonitor struct {
+	timer    *time.Timer
+	timeout  time.Duration
+	timedOut atomic.Bool
+	stopped  atomic.Bool
+}
+
+func newServerStreamIdleMonitor(timeout time.Duration, cancel context.CancelFunc) *serverStreamIdleMonitor {
+	monitor := &serverStreamIdleMonitor{}
+	if timeout <= 0 || cancel == nil {
+		return monitor
+	}
+
+	monitor.timeout = timeout
+	monitor.timer = time.AfterFunc(timeout, func() {
+		if monitor.stopped.Load() {
+			return
+		}
+		monitor.timedOut.Store(true)
+		cancel()
+	})
+	return monitor
+}
+
+func (m *serverStreamIdleMonitor) Reset() {
+	if m == nil || m.timer == nil || m.stopped.Load() {
+		return
+	}
+
+	m.timer.Reset(m.timeout)
+}
+
+func (m *serverStreamIdleMonitor) Stop() {
+	if m == nil || m.timer == nil {
+		return
+	}
+
+	m.stopped.Store(true)
+	m.timer.Stop()
+}
+
+func (m *serverStreamIdleMonitor) TimedOut() bool {
+	return m != nil && m.timedOut.Load()
 }
 
 func serverStreamErrorResult(stream grpc.ClientStream, headers map[string][]string, err error) ServerStreamConsumeResult {
@@ -265,5 +320,27 @@ func classifyServerStreamError(method contracts.CatalogMethod, err error) *endpo
 			"method": method.FullName,
 			"cause":  err.Error(),
 		},
+	}
+}
+
+func classifyServerStreamIdleTimeout(method contracts.CatalogMethod, timeout time.Duration) *endpointDiagnostic {
+	return &endpointDiagnostic{
+		Level:    "error",
+		Code:     "transport.stream_idle_timeout",
+		Category: contracts.ErrorCategoryTransport,
+		Message:  "The server-streaming call exceeded the configured idle timeout without receiving new stream data.",
+		NextStep: "Increase the stream idle timeout or retry after confirming the server is expected to keep the stream quiet for this long.",
+		Details: map[string]string{
+			"method":         method.FullName,
+			"grpcStatusCode": codes.DeadlineExceeded.String(),
+			"idleTimeoutMs":  fmt.Sprintf("%d", timeout.Milliseconds()),
+		},
+	}
+}
+
+func streamIdleTimeoutStatus(timeout time.Duration) contracts.StreamStatus {
+	return contracts.StreamStatus{
+		Code:    codes.DeadlineExceeded.String(),
+		Message: fmt.Sprintf("stream idle timeout after %s", timeout),
 	}
 }

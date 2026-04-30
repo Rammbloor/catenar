@@ -18,7 +18,7 @@ var secretMetadataKeys = map[string]struct{}{
 	"proxy-authorization": {},
 	"x-api-key":           {},
 	"api-key":             {},
-	"token":               {},
+	"apikey":              {},
 	"cookie":              {},
 	"set-cookie":          {},
 }
@@ -251,7 +251,7 @@ func buildUnaryHistoryEvents(record UnaryEventLogRecord) []contracts.HistoryLogE
 }
 
 func writeHistoryEvents(path string, events []contracts.HistoryLogEvent) error {
-	file, err := os.Create(path)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
@@ -301,7 +301,7 @@ func redactMetadataMap(values map[string]string) map[string]string {
 
 	redacted := make(map[string]string, len(values))
 	for key, value := range values {
-		if _, secret := secretMetadataKeys[strings.ToLower(strings.TrimSpace(key))]; secret {
+		if isSensitiveMetadataKey(key) {
 			redacted[key] = "[REDACTED]"
 			continue
 		}
@@ -318,7 +318,7 @@ func redactMetadataValues(values map[string][]string) map[string][]string {
 
 	redacted := make(map[string][]string, len(values))
 	for key, items := range values {
-		if _, secret := secretMetadataKeys[strings.ToLower(strings.TrimSpace(key))]; secret {
+		if isSensitiveMetadataKey(key) {
 			redacted[key] = []string{"[REDACTED]"}
 			continue
 		}
@@ -326,6 +326,18 @@ func redactMetadataValues(values map[string][]string) map[string][]string {
 	}
 
 	return redacted
+}
+
+func isSensitiveMetadataKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	if _, secret := secretMetadataKeys[normalized]; secret {
+		return true
+	}
+
+	return strings.Contains(normalized, "token") ||
+		strings.Contains(normalized, "secret") ||
+		strings.Contains(normalized, "credential") ||
+		strings.Contains(normalized, "password")
 }
 
 func metadataValuesEqual(left map[string][]string, right map[string][]string) bool {

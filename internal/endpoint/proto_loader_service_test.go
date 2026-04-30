@@ -143,6 +143,7 @@ func TestCallInvokeUnaryUsesCachedProtoCatalogWithoutReflectionAndPersistsHistor
 		Method:        "tether.demo.v1.ReflectionDemo.Ping",
 		Metadata: map[string]string{
 			"authorization": "Bearer proto-secret",
+			"x-auth-token":  "proto-auth-token-secret",
 			"x-request-id":  "req-proto-123",
 		},
 		Body: "2026-04-27T10:15:32Z",
@@ -189,6 +190,9 @@ func TestCallInvokeUnaryUsesCachedProtoCatalogWithoutReflectionAndPersistsHistor
 	}
 	if startedEvent.GRPC.Metadata["authorization"][0] != "[REDACTED]" {
 		t.Fatalf("expected authorization metadata to be redacted, got %+v", startedEvent.GRPC.Metadata)
+	}
+	if startedEvent.GRPC.Metadata["x-auth-token"][0] != "[REDACTED]" {
+		t.Fatalf("expected token-like metadata to be redacted, got %+v", startedEvent.GRPC.Metadata)
 	}
 	if startedEvent.GRPC.Metadata["x-request-id"][0] != "req-proto-123" {
 		t.Fatalf("expected non-secret metadata to be preserved, got %+v", startedEvent.GRPC.Metadata)

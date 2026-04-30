@@ -9,7 +9,7 @@ import type {
   SessionCondition,
   StreamState,
 } from '../contracts'
-import { STREAM_TRANSITIONS, verifyContractManifest } from '../contracts'
+import { STREAM_TRANSITIONS, TERMINAL_STREAM_STATES, verifyContractManifest } from '../contracts'
 
 export interface AppShellState {
   bootstrap?: BootstrapData
@@ -60,6 +60,10 @@ export function canTransition(from: StreamState, to: StreamState): boolean {
   return STREAM_TRANSITIONS.some((transition) => transition.from === from && transition.to.includes(to))
 }
 
+function isTerminalStreamState(state: StreamState): boolean {
+  return TERMINAL_STREAM_STATES.some((terminalState) => terminalState === state)
+}
+
 export function createAppShellStore() {
   const { subscribe, update } = writable<AppShellState>(initialState)
 
@@ -99,7 +103,8 @@ export function createAppShellStore() {
     },
     setStreamState(nextState: StreamState) {
       update((state) => {
-        if (!canTransition(state.activeStreamState, nextState)) {
+        const startsNewSession = nextState === 'connecting' && isTerminalStreamState(state.activeStreamState)
+        if (!startsNewSession && !canTransition(state.activeStreamState, nextState)) {
           return {
             ...state,
             diagnostics: [createInvalidTransitionEvent(state.activeStreamState, nextState), ...state.diagnostics],

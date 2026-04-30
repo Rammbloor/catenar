@@ -74,6 +74,7 @@ func TestCallStartStreamFromReflectionEmitsLifecycleEventsAndPersistsHistory(t *
 		RPCType:       contracts.RPCTypeServerStream,
 		Metadata: map[string]string{
 			"authorization": "Bearer streaming-secret",
+			"x-auth-token":  "streaming-auth-token-secret",
 			"x-request-id":  "stream-123",
 		},
 	})
@@ -145,13 +146,112 @@ func TestCallStartStreamFromReflectionEmitsLifecycleEventsAndPersistsHistory(t *
 	if historyGet.Data.Events[0].GRPC.Metadata["authorization"][0] != "[REDACTED]" {
 		t.Fatalf("expected request metadata to be redacted, got %+v", historyGet.Data.Events[0].GRPC.Metadata)
 	}
+	if historyGet.Data.Events[0].GRPC.Metadata["x-auth-token"][0] != "[REDACTED]" {
+		t.Fatalf("expected token-like request metadata to be redacted, got %+v", historyGet.Data.Events[0].GRPC.Metadata)
+	}
 
 	summaryPayload, err := os.ReadFile(summary.SummaryPath)
 	if err != nil {
 		t.Fatalf("read streaming summary: %v", err)
 	}
-	if strings.Contains(string(summaryPayload), "streaming-secret") || strings.Contains(string(summaryPayload), "stream-cookie-secret") {
+	if strings.Contains(string(summaryPayload), "streaming-secret") ||
+		strings.Contains(string(summaryPayload), "streaming-auth-token-secret") ||
+		strings.Contains(string(summaryPayload), "stream-cookie-secret") ||
+		strings.Contains(string(summaryPayload), "stream-token-secret") ||
+		strings.Contains(string(summaryPayload), "stream-trailer-secret") {
 		t.Fatalf("expected persisted streaming artifact to omit raw secret metadata, got %s", summaryPayload)
+	}
+}
+
+func TestCallStartStreamDoesNotUseUnaryRequestTimeoutAsStreamDeadline(t *testing.T) {
+	t.Parallel()
+
+	address, stop := startReflectionCatalogServer(t, reflectionCatalogServerOptions{
+		watchMessages:  []int64{1},
+		watchSendDelay: 75 * time.Millisecond,
+	})
+	defer stop()
+
+	service := NewService(ServiceDependencies{
+		AppDataDir: t.TempDir(),
+	})
+	emitter := newStreamEmitterSpy()
+	service.SetEmitter(emitter)
+
+	catalogResponse := service.CatalogLoadFromReflection(context.Background(), contracts.CatalogLoadFromReflectionInput{
+		Endpoint: contracts.EndpointPreset{
+			Target:              address,
+			TLS:                 contracts.EndpointTLSSettings{Mode: contracts.TLSModePlaintext},
+			ConnectTimeoutMs:    3000,
+			RequestTimeoutMs:    1,
+			StreamIdleTimeoutMs: 0,
+		},
+	})
+	if !catalogResponse.Ok || catalogResponse.Data == nil {
+		t.Fatalf("expected reflection catalog, got %+v", catalogResponse.Error)
+	}
+
+	response := service.CallStartStream(context.Background(), contracts.CallStartStreamInput{
+		CatalogSource: contracts.CatalogSourceReflection,
+		EndpointID:    catalogResponse.Data.Endpoint.ID,
+		Method:        "tether.demo.v1.ReflectionDemo.Watch",
+		RPCType:       contracts.RPCTypeServerStream,
+	})
+	if !response.Ok || response.Data == nil {
+		t.Fatalf("expected stream start acknowledgement, got %+v", response.Error)
+	}
+
+	completed := waitForStreamCompleted(t, emitter, response.Data.SessionID)
+	if completed.FinalState != contracts.StreamStateClosed || completed.Status.Code != codes.OK.String() {
+		t.Fatalf("expected stream to ignore unary request timeout and close normally, got %+v", completed)
+	}
+}
+
+func TestCallStartStreamAppliesStreamIdleTimeout(t *testing.T) {
+	t.Parallel()
+
+	address, stop := startReflectionCatalogServer(t, reflectionCatalogServerOptions{
+		watchBlockUntilCancel: true,
+	})
+	defer stop()
+
+	service := NewService(ServiceDependencies{
+		AppDataDir: t.TempDir(),
+	})
+	emitter := newStreamEmitterSpy()
+	service.SetEmitter(emitter)
+
+	catalogResponse := service.CatalogLoadFromReflection(context.Background(), contracts.CatalogLoadFromReflectionInput{
+		Endpoint: contracts.EndpointPreset{
+			Target:              address,
+			TLS:                 contracts.EndpointTLSSettings{Mode: contracts.TLSModePlaintext},
+			ConnectTimeoutMs:    3000,
+			RequestTimeoutMs:    0,
+			StreamIdleTimeoutMs: 30,
+		},
+	})
+	if !catalogResponse.Ok || catalogResponse.Data == nil {
+		t.Fatalf("expected reflection catalog, got %+v", catalogResponse.Error)
+	}
+
+	response := service.CallStartStream(context.Background(), contracts.CallStartStreamInput{
+		CatalogSource: contracts.CatalogSourceReflection,
+		EndpointID:    catalogResponse.Data.Endpoint.ID,
+		Method:        "tether.demo.v1.ReflectionDemo.Watch",
+		RPCType:       contracts.RPCTypeServerStream,
+	})
+	if !response.Ok || response.Data == nil {
+		t.Fatalf("expected stream start acknowledgement, got %+v", response.Error)
+	}
+
+	errorEvent := waitForStreamError(t, emitter, response.Data.SessionID)
+	if errorEvent.Error.Code != "transport.stream_idle_timeout" || errorEvent.Error.Category != contracts.ErrorCategoryTransport {
+		t.Fatalf("expected idle timeout transport diagnostic, got %+v", errorEvent)
+	}
+
+	completed := waitForStreamCompleted(t, emitter, response.Data.SessionID)
+	if completed.FinalState != contracts.StreamStateError || completed.Status.Code != codes.DeadlineExceeded.String() {
+		t.Fatalf("expected idle timeout completion with DEADLINE_EXCEEDED, got %+v", completed)
 	}
 }
 

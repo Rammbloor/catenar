@@ -175,6 +175,7 @@ func TestCallInvokeUnaryUsesCachedReflectionCatalogAndPersistsHistory(t *testing
 		Method:     "tether.demo.v1.ReflectionDemo.Ping",
 		Metadata: map[string]string{
 			"authorization": "Bearer very-secret",
+			"x-auth-token":  "reflection-auth-token-secret",
 			"x-request-id":  "req-123",
 		},
 		Body: "2026-04-27T10:15:32Z",
@@ -237,6 +238,9 @@ func TestCallInvokeUnaryUsesCachedReflectionCatalogAndPersistsHistory(t *testing
 	if startedEvent.GRPC.Metadata["authorization"][0] != "[REDACTED]" {
 		t.Fatalf("expected authorization metadata to be redacted, got %+v", startedEvent.GRPC.Metadata)
 	}
+	if startedEvent.GRPC.Metadata["x-auth-token"][0] != "[REDACTED]" {
+		t.Fatalf("expected token-like metadata to be redacted, got %+v", startedEvent.GRPC.Metadata)
+	}
 	if startedEvent.GRPC.Metadata["x-request-id"][0] != "req-123" {
 		t.Fatalf("expected non-secret metadata to be preserved, got %+v", startedEvent.GRPC.Metadata)
 	}
@@ -251,7 +255,10 @@ func TestCallInvokeUnaryUsesCachedReflectionCatalogAndPersistsHistory(t *testing
 	if err != nil {
 		t.Fatalf("read summary payload: %v", err)
 	}
-	if strings.Contains(string(summaryPayload), "reflection-secret") {
+	if strings.Contains(string(summaryPayload), "reflection-secret") ||
+		strings.Contains(string(summaryPayload), "reflection-auth-token-secret") ||
+		strings.Contains(string(summaryPayload), "reflection-token-secret") ||
+		strings.Contains(string(summaryPayload), "reflection-refresh-token-secret") {
 		t.Fatalf("expected persisted summary artifact to omit raw secret metadata, got %s", summaryPayload)
 	}
 }

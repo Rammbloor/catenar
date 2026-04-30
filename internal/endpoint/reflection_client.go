@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -398,6 +399,15 @@ func classifyReflectionError(endpointPreset contracts.EndpointPreset, err error)
 			NextStep: "Use proto import for this service or enable and route the reflection service on the server.",
 			Details:  details,
 		}
+	case errors.Is(err, io.EOF):
+		return &endpointDiagnostic{
+			Level:    "error",
+			Code:     "reflection.unavailable",
+			Category: contracts.ErrorCategoryReflection,
+			Message:  "The endpoint closed the reflection stream without returning a reflection catalog.",
+			NextStep: "Use proto import for this service or enable and route the reflection service on the server.",
+			Details:  details,
+		}
 	case statusCode == codes.PermissionDenied || statusCode == codes.Unauthenticated:
 		return &endpointDiagnostic{
 			Level:    "error",
@@ -431,7 +441,7 @@ func classifyReflectionError(endpointPreset contracts.EndpointPreset, err error)
 }
 
 func isReflectionUnavailableStatus(err error) bool {
-	return status.Code(err) == codes.Unimplemented || status.Code(err) == codes.NotFound
+	return status.Code(err) == codes.Unimplemented || status.Code(err) == codes.NotFound || errors.Is(err, io.EOF)
 }
 
 type chainedResolver struct {

@@ -58,6 +58,18 @@ describe('createAppShellStore', () => {
     expect(state.activeStreamState).toBe('idle')
     expect(state.diagnostics[0]?.code).toBe('application.invalid_state_transition')
   })
+
+  it('allows a new stream session to start after a terminal state', () => {
+    const store = createAppShellStore()
+    store.setStreamState('connecting')
+    store.setStreamState('open')
+    store.setStreamState('closed')
+    store.setStreamState('connecting')
+
+    const state = get(store)
+    expect(state.activeStreamState).toBe('connecting')
+    expect(state.diagnostics).toEqual([])
+  })
 })
 
 describe('canTransition', () => {

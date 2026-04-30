@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime'
+  import { EventsOn } from '../wailsjs/runtime/runtime'
   import DiagnosticsPanel from './lib/components/DiagnosticsPanel.svelte'
   import HomeView from './lib/components/HomeView.svelte'
   import NavRail from './lib/components/NavRail.svelte'
@@ -44,14 +44,14 @@
   }
 
   onMount(() => {
-    EventsOn('diagnostics:update', (payload: DiagnosticsUpdateEvent) => {
+    const offDiagnostics = EventsOn('diagnostics:update', (payload: DiagnosticsUpdateEvent) => {
       shell.applyDiagnosticsEvent(payload)
     })
-    EventsOn('stream:state', (payload: StreamStateEvent) => {
+    const offStreamState = EventsOn('stream:state', (payload: StreamStateEvent) => {
       shell.setStreamState(payload.state)
       shell.setStreamConditions(payload.conditions)
     })
-    EventsOn('stream:completed', (payload: StreamCompletedEvent) => {
+    const offStreamCompleted = EventsOn('stream:completed', (payload: StreamCompletedEvent) => {
       shell.setStreamState(payload.finalState)
       shell.setStreamConditions(payload.conditions)
     })
@@ -68,7 +68,9 @@
     })()
 
     return () => {
-      EventsOff('diagnostics:update', 'stream:state', 'stream:completed')
+      offDiagnostics()
+      offStreamState()
+      offStreamCompleted()
     }
   })
 </script>

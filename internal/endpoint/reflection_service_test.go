@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -206,6 +207,7 @@ type reflectionCatalogServerOptions struct {
 	serverTLS             *tls.Config
 	watchMessages         []int64
 	watchBlockUntilCancel bool
+	watchSendDelay        time.Duration
 	watchStatusCode       codes.Code
 	watchStatusMessage    string
 }
@@ -217,6 +219,7 @@ type reflectionDemoMarker interface {
 type reflectionDemoService struct {
 	watchMessages         []int64
 	watchBlockUntilCancel bool
+	watchSendDelay        time.Duration
 	watchStatusCode       codes.Code
 	watchStatusMessage    string
 }
@@ -242,12 +245,14 @@ var reflectionDemoServiceDesc = grpc.ServiceDesc{
 				if err := grpc.SetHeader(ctx, metadata.Pairs(
 					"x-reflection-demo", "ping",
 					"set-cookie", "session=reflection-secret",
+					"x-auth-token", "reflection-token-secret",
 				)); err != nil {
 					return nil, err
 				}
 				if err := grpc.SetTrailer(ctx, metadata.Pairs(
 					"x-reflection-demo-trailer", "ok",
 					"set-cookie", "refresh=reflection-secret",
+					"x-refresh-token", "reflection-refresh-token-secret",
 				)); err != nil {
 					return nil, err
 				}
@@ -272,12 +277,14 @@ var reflectionDemoServiceDesc = grpc.ServiceDesc{
 				if err := grpc.SetHeader(stream.Context(), metadata.Pairs(
 					"x-reflection-demo", "watch",
 					"set-cookie", "stream=stream-cookie-secret",
+					"x-stream-token", "stream-token-secret",
 				)); err != nil {
 					return err
 				}
 				if err := grpc.SetTrailer(stream.Context(), metadata.Pairs(
 					"x-reflection-demo-trailer", "stream-ok",
 					"set-cookie", "stream-refresh=stream-cookie-secret",
+					"x-stream-secret", "stream-trailer-secret",
 				)); err != nil {
 					return err
 				}
@@ -296,6 +303,13 @@ var reflectionDemoServiceDesc = grpc.ServiceDesc{
 					messages = []int64{1}
 				}
 				for _, seconds := range messages {
+					if demoService.watchSendDelay > 0 {
+						select {
+						case <-time.After(demoService.watchSendDelay):
+						case <-stream.Context().Done():
+							return stream.Context().Err()
+						}
+					}
 					if err := stream.SendMsg(&timestamppb.Timestamp{Seconds: seconds}); err != nil {
 						return err
 					}
@@ -324,6 +338,7 @@ func startReflectionCatalogServer(t *testing.T, options reflectionCatalogServerO
 	server.RegisterService(&reflectionDemoServiceDesc, reflectionDemoService{
 		watchMessages:         append([]int64(nil), options.watchMessages...),
 		watchBlockUntilCancel: options.watchBlockUntilCancel,
+		watchSendDelay:        options.watchSendDelay,
 		watchStatusCode:       options.watchStatusCode,
 		watchStatusMessage:    options.watchStatusMessage,
 	})

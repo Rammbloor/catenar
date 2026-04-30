@@ -176,12 +176,12 @@ func (s *Service) CallStartStream(ctx context.Context, input contracts.CallStart
 	}
 
 	mergedMetadata := mergeInvokeMetadata(cachedCatalog.endpoint.MetadataDefaults, input.Metadata)
+	streamIdleTimeout := resolveServerStreamIdleTimeout(cachedCatalog.endpoint, input.CallOptions)
 	streamStart, startDiagnostic := s.grpcRuntime.StartServerStream(ctx, conn, ServerStreamStartRequest{
-		Method:         selectedMethod,
-		Descriptor:     methodDescriptor,
-		Metadata:       mergedMetadata,
-		Body:           requestBody,
-		RequestTimeout: resolveUnaryRequestTimeout(cachedCatalog.endpoint, input.CallOptions),
+		Method:     selectedMethod,
+		Descriptor: methodDescriptor,
+		Metadata:   mergedMetadata,
+		Body:       requestBody,
 	})
 	if startDiagnostic != nil {
 		s.removeActiveStreamSession(sessionID)
@@ -215,6 +215,7 @@ func (s *Service) CallStartStream(ctx context.Context, input contracts.CallStart
 		methodDesc:   methodDescriptor,
 		recorder:     recorder,
 		serverStream: streamStart,
+		idleTimeout:  streamIdleTimeout,
 	})
 
 	return contracts.CallStartStreamResponse{
@@ -272,6 +273,7 @@ type streamSessionRunInput struct {
 	methodDesc   protoreflect.MethodDescriptor
 	recorder     *streamHistoryRecorder
 	serverStream ServerStreamStartResult
+	idleTimeout  time.Duration
 }
 
 func (s *Service) runServerStreamSession(ctx context.Context, input streamSessionRunInput) {
@@ -282,9 +284,11 @@ func (s *Service) runServerStreamSession(ctx context.Context, input streamSessio
 	}()
 
 	consumeResult, consumeDiagnostic := s.grpcRuntime.ConsumeServerStream(ServerStreamConsumeRequest{
-		Method:     input.method,
-		Descriptor: input.methodDesc,
-		Stream:     input.serverStream.Stream,
+		Method:      input.method,
+		Descriptor:  input.methodDesc,
+		Stream:      input.serverStream.Stream,
+		Cancel:      input.serverStream.Cancel,
+		IdleTimeout: input.idleTimeout,
 		OnHeaders: func(headers map[string][]string, ts time.Time) {
 			event := input.recorder.recordHeaders(headers, ts)
 			s.emitHistoryBackedStreamEvent(event)
@@ -399,6 +403,19 @@ func serverStreamRequestBody(methodDescriptor protoreflect.MethodDescriptor, inp
 	}
 
 	return input.RequestSpec.Messages[0].Body, nil
+}
+
+func resolveServerStreamIdleTimeout(endpointPreset contracts.EndpointPreset, callOptions contracts.CallOptions) time.Duration {
+	timeoutMs := endpointPreset.StreamIdleTimeoutMs
+	if callOptions.StreamIdleTimeoutMs > 0 {
+		timeoutMs = callOptions.StreamIdleTimeoutMs
+	}
+
+	if timeoutMs <= 0 {
+		return 0
+	}
+
+	return time.Duration(timeoutMs) * time.Millisecond
 }
 
 func (s *Service) reserveActiveStreamSession(session *activeStreamSession) *contracts.ErrorEnvelope {
