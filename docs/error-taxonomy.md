@@ -17,7 +17,6 @@
 - `transport` и `reflection` поднимаются в diagnostics panel
 - `grpc_status` живет и в response summary, и в diagnostics
 - `cancelled` отображается как нейтральный terminal outcome
-- streaming failures keep raw diagnostic/error codes such as `grpc_status.invalid_argument` as machine values; localized UI copy is mapped separately from the stable code
 
 ## Source of truth
 

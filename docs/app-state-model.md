@@ -22,8 +22,6 @@
 - terminal states: `closed`, `cancelled`, `error`
 - conditions: `truncated`
 - в MVP поддерживается только одна active live interactive session
-- server-streaming sessions move `connecting -> open -> closed|cancelled|error`
-- client-streaming static sequence sessions move `connecting -> open -> half_closed_local -> closed|cancelled|error`
 
 ## Source of truth
 

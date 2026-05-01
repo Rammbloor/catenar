@@ -14,16 +14,6 @@ Desktop-first gRPC GUI client foundations built with `Wails v2 + Go + Svelte 5 +
 - `Slice 1.2` complete: reflection-driven service catalog loading with stable `reflection.*` diagnostics and well-known type surfacing.
 - `Slice 1.3` complete: reflection-selected unary request templates, end-to-end unary invoke, response panel data, SQLite-backed history summaries and JSONL session log artifacts.
 
-## Epic 2 status
-
-- `Slice 2.1` complete: local proto source loading, import path handling and proto-backed request templates share the same catalog surface as reflection.
-- `UX/i18n stabilization` complete: RU/EN language selection covers the app shell, navigation, diagnostics, workspace/session panels and bootstrap-derived copy while preserving raw contract values such as event names and diagnostic codes.
-
-## Epic 3 status
-
-- `Slice 3.1` complete: server-streaming calls run through `CallStartStream`, emit live `stream:*` events and persist history/session log artifacts.
-- `Slice 3.2` complete: client-streaming static sequences can send a fixed JSON message list, half-close the client send side, receive one response/status/trailers set and persist the resulting history/session artifacts.
-
 ## Local development
 
 1. Install frontend dependencies:
