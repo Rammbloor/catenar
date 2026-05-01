@@ -13,6 +13,17 @@
     StreamCompletedEvent,
     StreamStateEvent,
   } from './lib/contracts'
+  import {
+    i18n,
+    language,
+    setLanguage,
+    SUPPORTED_LANGUAGES,
+    translateDiagnosticCodeLabel,
+    translateProductLine,
+    translateStreamStateLabel,
+    translateViewLabel,
+    type Language,
+  } from './lib/i18n'
   import { createAppShellStore } from './lib/state/app-shell'
   import { emitDiagnosticsProbe, fetchBootstrap } from './lib/wails/backend'
 
@@ -38,9 +49,24 @@
       const acknowledgement = await emitDiagnosticsProbe()
       shell.finishProbe(acknowledgement)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unexpected diagnostics probe failure.'
+      const message = error instanceof Error ? error.message : $i18n.t('errors.diagnosticsProbeUnexpected')
       shell.setProbeError(message)
     }
+  }
+
+  function handleLanguageChange(event: Event): void {
+    const nextLanguage = (event.currentTarget as HTMLSelectElement).value as Language
+    setLanguage(nextLanguage)
+  }
+
+  function formatProbeFooter(): string {
+    const classification = $shell.eventProbe.lastAcknowledgement?.classification
+    if (classification) {
+      const label = translateDiagnosticCodeLabel($i18n.language, classification)
+      return label === classification ? classification : `${label} (${classification})`
+    }
+
+    return $shell.eventProbe.error ?? $i18n.t('footer.notRun')
   }
 
   onMount(() => {
@@ -62,7 +88,7 @@
         shell.hydrateBootstrap(bootstrap)
         await runProbe()
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to bootstrap the application shell.'
+        const message = error instanceof Error ? error.message : $i18n.t('errors.bootstrapUnexpected')
         shell.setBootstrapError(message)
       }
     })()
@@ -76,32 +102,42 @@
 </script>
 
 <svelte:head>
-  <title>tether</title>
+  <title>{$i18n.t('app.title')}</title>
 </svelte:head>
 
 <div class="app-shell">
   <header class="topbar">
     <div class="topbar__identity">
       <div>
-        <p class="eyebrow">Epic 0 Foundations</p>
+        <p class="eyebrow">{$i18n.t('topbar.eyebrow')}</p>
         <h1>tether</h1>
       </div>
       <p class="tagline">
-        {$shell.bootstrap?.app.productLine ?? 'Desktop-first gRPC debugging workspace'}
+        {translateProductLine($i18n.language, $shell.bootstrap?.app.productLine)}
       </p>
     </div>
 
     <div class="topbar__meta">
       <div class="meta-chip">
-        <span>runtime</span>
-        <strong>{$shell.bootstrap?.app.platform ?? 'booting'} / {$shell.bootstrap?.app.architecture ?? '...'}</strong>
+        <span>{$i18n.t('topbar.runtime')}</span>
+        <strong>{$shell.bootstrap?.app.platform ?? $i18n.t('common.booting')} / {$shell.bootstrap?.app.architecture ?? $i18n.t('common.archPending')}</strong>
       </div>
       <div class="meta-chip" class:meta-chip--warning={$shell.contractMismatch.length > 0}>
-        <span>contract</span>
-        <strong>{$shell.contractMismatch.length === 0 ? 'verified' : 'mismatch'}</strong>
+        <span>{$i18n.t('topbar.contract')}</span>
+        <strong>{$shell.contractMismatch.length === 0 ? $i18n.t('common.contractVerified') : $i18n.t('common.contractDrift')}</strong>
       </div>
+      <label class="language-switcher">
+        <span>{$i18n.t('common.language')}</span>
+        <select value={$language} on:change={handleLanguageChange}>
+          {#each SUPPORTED_LANGUAGES as supportedLanguage}
+            <option value={supportedLanguage}>
+              {supportedLanguage === 'ru' ? $i18n.t('common.languageRu') : $i18n.t('common.languageEn')}
+            </option>
+          {/each}
+        </select>
+      </label>
       <button class="action-button" on:click={runProbe} disabled={$shell.eventProbe.pending}>
-        {$shell.eventProbe.pending ? 'Probing event bridge…' : 'Probe event bridge'}
+        {$shell.eventProbe.pending ? $i18n.t('topbar.probePending') : $i18n.t('topbar.probe')}
       </button>
     </div>
   </header>
@@ -117,12 +153,12 @@
     <main class="canvas">
       {#if $shell.bootstrapError}
         <section class="panel panel--critical">
-          <h2>Bootstrap failed</h2>
+          <h2>{$i18n.t('app.bootstrapFailed')}</h2>
           <p>{$shell.bootstrapError}</p>
         </section>
       {:else if !$shell.bootstrap}
         <section class="panel panel--loading">
-          <p>Loading the Wails runtime contract and app shell…</p>
+          <p>{$i18n.t('app.loading')}</p>
         </section>
       {:else}
         {#if isActiveView('home')}
@@ -166,22 +202,20 @@
 
   <footer class="status-strip">
     <div>
-      <span class="status-label">view</span>
-      <strong>{$shell.currentView}</strong>
+      <span class="status-label">{$i18n.t('common.view')}</span>
+      <strong>{translateViewLabel($i18n.language, $shell.currentView)}</strong>
     </div>
     <div>
-      <span class="status-label">stream</span>
-      <strong>{$shell.activeStreamState}</strong>
+      <span class="status-label">{$i18n.t('footer.stream')}</span>
+      <strong>{translateStreamStateLabel($i18n.language, $shell.activeStreamState)}</strong>
     </div>
     <div>
-      <span class="status-label">diagnostics</span>
+      <span class="status-label">{$i18n.t('common.diagnostics')}</span>
       <strong>{$shell.diagnostics.length}</strong>
     </div>
     <div>
-      <span class="status-label">probe</span>
-      <strong>
-        {$shell.eventProbe.lastAcknowledgement?.classification ?? $shell.eventProbe.error ?? 'not-run'}
-      </strong>
+      <span class="status-label">{$i18n.t('footer.probe')}</span>
+      <strong>{formatProbeFooter()}</strong>
     </div>
   </footer>
 </div>

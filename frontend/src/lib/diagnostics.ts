@@ -1,3 +1,5 @@
+import { translate, type Language } from './i18n'
+
 export interface DiagnosticContextRow {
   label: string
   value: string
@@ -33,7 +35,18 @@ export function formatDiagnosticLocation(details: Record<string, string> | undef
   return file
 }
 
-export function getDiagnosticContextRows(details: Record<string, string> | undefined): DiagnosticContextRow[] {
+function formatDiagnosticLabel(language: Language, key: string): string {
+  if (key === 'cause') {
+    return translate(language, 'diagnostics.detail.cause')
+  }
+
+  return humanizeDiagnosticKey(key)
+}
+
+export function getDiagnosticContextRows(
+  details: Record<string, string> | undefined,
+  language: Language = 'en',
+): DiagnosticContextRow[] {
   if (!details) {
     return []
   }
@@ -41,12 +54,12 @@ export function getDiagnosticContextRows(details: Record<string, string> | undef
   const rows: DiagnosticContextRow[] = []
   const location = formatDiagnosticLocation(details)
   if (location) {
-    rows.push({ label: 'Source', value: location })
+    rows.push({ label: translate(language, 'diagnostics.detail.source'), value: location })
   }
 
   const importedPath = readDetail(details, 'import')
   if (importedPath) {
-    rows.push({ label: 'Import', value: importedPath })
+    rows.push({ label: translate(language, 'diagnostics.detail.import'), value: importedPath })
   }
 
   const consumedKeys = new Set(['file', 'line', 'column', 'import'])
@@ -56,7 +69,7 @@ export function getDiagnosticContextRows(details: Record<string, string> | undef
 
   for (const key of extraKeys) {
     rows.push({
-      label: humanizeDiagnosticKey(key),
+      label: formatDiagnosticLabel(language, key),
       value: details[key],
     })
   }

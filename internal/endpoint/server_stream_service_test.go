@@ -372,6 +372,256 @@ func TestCallStartStreamPersistsGRPCStatusFailureAsDiagnostic(t *testing.T) {
 	}
 }
 
+func TestCallStartStreamClientStreamingStaticSequencePersistsHistory(t *testing.T) {
+	t.Parallel()
+
+	address, stop := startReflectionCatalogServer(t, reflectionCatalogServerOptions{})
+	defer stop()
+
+	service := NewService(ServiceDependencies{
+		AppDataDir: t.TempDir(),
+	})
+	emitter := newStreamEmitterSpy()
+	service.SetEmitter(emitter)
+
+	catalogResponse := service.CatalogLoadFromReflection(context.Background(), contracts.CatalogLoadFromReflectionInput{
+		Endpoint: contracts.EndpointPreset{
+			Target:           address,
+			TLS:              contracts.EndpointTLSSettings{Mode: contracts.TLSModePlaintext},
+			ConnectTimeoutMs: 3000,
+			RequestTimeoutMs: 1000,
+		},
+	})
+	if !catalogResponse.Ok || catalogResponse.Data == nil {
+		t.Fatalf("expected reflection catalog, got %+v", catalogResponse.Error)
+	}
+
+	response := service.CallStartStream(context.Background(), contracts.CallStartStreamInput{
+		CatalogSource: contracts.CatalogSourceReflection,
+		EndpointID:    catalogResponse.Data.Endpoint.ID,
+		Method:        "tether.demo.v1.ReflectionDemo.Upload",
+		RPCType:       contracts.RPCTypeClientStream,
+		Metadata: map[string]string{
+			"authorization": "Bearer client-stream-secret",
+			"x-request-id":  "client-stream-123",
+		},
+		RequestSpec: &contracts.StreamRequestSpec{
+			Mode: contracts.RequestModeStaticSequence,
+			Messages: []contracts.StreamMessage{
+				{Body: "1970-01-01T00:00:01Z"},
+				{Body: "1970-01-01T00:00:03Z"},
+			},
+		},
+	})
+	if !response.Ok || response.Data == nil {
+		t.Fatalf("expected client stream start acknowledgement, got %+v", response.Error)
+	}
+
+	completed := waitForStreamCompleted(t, emitter, response.Data.SessionID)
+	if completed.FinalState != contracts.StreamStateClosed || completed.Status.Code != codes.OK.String() {
+		t.Fatalf("expected closed client stream completion, got %+v", completed)
+	}
+
+	stateSequence := streamStatesForSession(emitter, response.Data.SessionID)
+	expectedStates := []contracts.StreamState{
+		contracts.StreamStateConnecting,
+		contracts.StreamStateOpen,
+		contracts.StreamStateHalfClosedLocal,
+		contracts.StreamStateClosed,
+	}
+	if !slices.Equal(stateSequence, expectedStates) {
+		t.Fatalf("expected state sequence %+v, got %+v", expectedStates, stateSequence)
+	}
+
+	sentEvents := streamEventsForSession(emitter, response.Data.SessionID, "message_sent")
+	if len(sentEvents) != 2 {
+		t.Fatalf("expected two sent message events, got %+v", sentEvents)
+	}
+	if sentEvents[1].Payload.Preview.JSON != "1970-01-01T00:00:03Z" {
+		t.Fatalf("expected second sent message preview, got %+v", sentEvents[1].Payload.Preview.JSON)
+	}
+
+	receivedEvents := streamEventsForSession(emitter, response.Data.SessionID, "message_received")
+	if len(receivedEvents) != 1 {
+		t.Fatalf("expected one received response event, got %+v", receivedEvents)
+	}
+
+	historyList := service.HistoryList(context.Background(), contracts.HistoryListInput{Limit: 5})
+	if !historyList.Ok || historyList.Data == nil || len(historyList.Data.Calls) != 1 {
+		t.Fatalf("expected one history summary, got %+v", historyList)
+	}
+
+	summary := historyList.Data.Calls[0]
+	if summary.CallID != response.Data.CallID || summary.RPCType != contracts.RPCTypeClientStream {
+		t.Fatalf("unexpected client streaming summary identity: %+v", summary)
+	}
+	if summary.State != contracts.StreamStateClosed || summary.RequestCount != 2 || summary.ResponseCount != 1 {
+		t.Fatalf("unexpected client streaming summary counts/state: %+v", summary)
+	}
+
+	historyGet := service.HistoryGet(context.Background(), response.Data.CallID)
+	if !historyGet.Ok || historyGet.Data == nil {
+		t.Fatalf("expected client streaming history detail, got %+v", historyGet.Error)
+	}
+
+	eventKinds := make([]string, 0, len(historyGet.Data.Events))
+	for _, event := range historyGet.Data.Events {
+		eventKinds = append(eventKinds, event.Kind)
+	}
+	for _, expectedKind := range []string{
+		"call_started",
+		"message_sent",
+		"send_half_closed",
+		"headers_received",
+		"message_received",
+		"trailers_received",
+		"call_finished",
+	} {
+		if !slices.Contains(eventKinds, expectedKind) {
+			t.Fatalf("expected history event %q, got %+v", expectedKind, eventKinds)
+		}
+	}
+
+	requestBodies, ok := historyGet.Data.RequestBody.([]any)
+	if !ok || len(requestBodies) != 2 {
+		t.Fatalf("expected static sequence request body, got %#v", historyGet.Data.RequestBody)
+	}
+	if historyGet.Data.Events[0].GRPC.Metadata["authorization"][0] != "[REDACTED]" {
+		t.Fatalf("expected request metadata to be redacted, got %+v", historyGet.Data.Events[0].GRPC.Metadata)
+	}
+}
+
+func TestCallStartStreamClientStreamingValidatesStaticSequence(t *testing.T) {
+	t.Parallel()
+
+	address, stop := startReflectionCatalogServer(t, reflectionCatalogServerOptions{})
+	defer stop()
+
+	service := NewService(ServiceDependencies{
+		AppDataDir: t.TempDir(),
+	})
+	catalogResponse := service.CatalogLoadFromReflection(context.Background(), contracts.CatalogLoadFromReflectionInput{
+		Endpoint: contracts.EndpointPreset{
+			Target:           address,
+			TLS:              contracts.EndpointTLSSettings{Mode: contracts.TLSModePlaintext},
+			ConnectTimeoutMs: 3000,
+			RequestTimeoutMs: 1000,
+		},
+	})
+	if !catalogResponse.Ok || catalogResponse.Data == nil {
+		t.Fatalf("expected reflection catalog, got %+v", catalogResponse.Error)
+	}
+
+	baseInput := contracts.CallStartStreamInput{
+		CatalogSource: contracts.CatalogSourceReflection,
+		EndpointID:    catalogResponse.Data.Endpoint.ID,
+		Method:        "tether.demo.v1.ReflectionDemo.Upload",
+		RPCType:       contracts.RPCTypeClientStream,
+	}
+
+	tests := []struct {
+		name string
+		spec *contracts.StreamRequestSpec
+		code string
+	}{
+		{
+			name: "missing spec",
+			spec: nil,
+			code: "validation.client_stream_static_sequence_required",
+		},
+		{
+			name: "interactive mode",
+			spec: &contracts.StreamRequestSpec{Mode: contracts.RequestModeInteractive},
+			code: "validation.client_stream_static_sequence_required",
+		},
+		{
+			name: "empty messages",
+			spec: &contracts.StreamRequestSpec{Mode: contracts.RequestModeStaticSequence},
+			code: "validation.client_stream_messages_required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := baseInput
+			input.RequestSpec = tt.spec
+			response := service.CallStartStream(context.Background(), input)
+			if response.Ok || response.Error == nil {
+				t.Fatalf("expected validation error, got %+v", response)
+			}
+			if response.Error.Code != tt.code || response.Error.Category != contracts.ErrorCategoryValidation {
+				t.Fatalf("expected %s validation error, got %+v", tt.code, response.Error)
+			}
+		})
+	}
+}
+
+func TestCallStartStreamClientStreamingPersistsGRPCStatusFailure(t *testing.T) {
+	t.Parallel()
+
+	address, stop := startReflectionCatalogServer(t, reflectionCatalogServerOptions{
+		uploadStatusCode:    codes.InvalidArgument,
+		uploadStatusMessage: "upload rejected",
+	})
+	defer stop()
+
+	service := NewService(ServiceDependencies{
+		AppDataDir: t.TempDir(),
+	})
+	emitter := newStreamEmitterSpy()
+	service.SetEmitter(emitter)
+
+	catalogResponse := service.CatalogLoadFromReflection(context.Background(), contracts.CatalogLoadFromReflectionInput{
+		Endpoint: contracts.EndpointPreset{
+			Target:           address,
+			TLS:              contracts.EndpointTLSSettings{Mode: contracts.TLSModePlaintext},
+			ConnectTimeoutMs: 3000,
+			RequestTimeoutMs: 1000,
+		},
+	})
+	if !catalogResponse.Ok || catalogResponse.Data == nil {
+		t.Fatalf("expected reflection catalog, got %+v", catalogResponse.Error)
+	}
+
+	response := service.CallStartStream(context.Background(), contracts.CallStartStreamInput{
+		CatalogSource: contracts.CatalogSourceReflection,
+		EndpointID:    catalogResponse.Data.Endpoint.ID,
+		Method:        "tether.demo.v1.ReflectionDemo.Upload",
+		RPCType:       contracts.RPCTypeClientStream,
+		RequestSpec: &contracts.StreamRequestSpec{
+			Mode: contracts.RequestModeStaticSequence,
+			Messages: []contracts.StreamMessage{
+				{Body: "1970-01-01T00:00:01Z"},
+			},
+		},
+	})
+	if !response.Ok || response.Data == nil {
+		t.Fatalf("expected client stream start acknowledgement, got %+v", response.Error)
+	}
+
+	errorEvent := waitForStreamError(t, emitter, response.Data.SessionID)
+	if errorEvent.Error.Code != "grpc_status.invalid_argument" || errorEvent.Error.Category != contracts.ErrorCategoryGRPCStatus {
+		t.Fatalf("expected grpc status client stream error, got %+v", errorEvent)
+	}
+
+	completed := waitForStreamCompleted(t, emitter, response.Data.SessionID)
+	if completed.FinalState != contracts.StreamStateError || completed.Status.Code != codes.InvalidArgument.String() {
+		t.Fatalf("expected error completion with INVALID_ARGUMENT, got %+v", completed)
+	}
+
+	historyList := service.HistoryList(context.Background(), contracts.HistoryListInput{Limit: 5})
+	if !historyList.Ok || historyList.Data == nil || len(historyList.Data.Calls) != 1 {
+		t.Fatalf("expected failed client stream history summary, got %+v", historyList)
+	}
+	summary := historyList.Data.Calls[0]
+	if summary.ErrorCategory != contracts.ErrorCategoryGRPCStatus || summary.ErrorCode != "grpc_status.invalid_argument" {
+		t.Fatalf("expected grpc status classification in history, got %+v", summary)
+	}
+	if summary.RPCType != contracts.RPCTypeClientStream || summary.RequestCount != 1 {
+		t.Fatalf("expected client stream summary with one request, got %+v", summary)
+	}
+}
+
 func TestCallStartStreamRejectsUnavailableGRPCChannelWithTransportDiagnostic(t *testing.T) {
 	t.Parallel()
 

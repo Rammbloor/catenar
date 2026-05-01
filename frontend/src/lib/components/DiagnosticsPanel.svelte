@@ -2,6 +2,12 @@
   import { createEventDispatcher } from 'svelte'
   import type { DiagnosticsUpdateEvent, EventProbeState } from '../contracts'
   import { getDiagnosticContextRows } from '../diagnostics'
+  import {
+    i18n,
+    translateDiagnosticCodeLabel,
+    translateDiagnosticMessage,
+    translateDiagnosticNextStep,
+  } from '../i18n'
 
   export let isOpen: boolean
   export let diagnostics: DiagnosticsUpdateEvent[]
@@ -11,39 +17,44 @@
   const dispatch = createEventDispatcher<{
     close: void
   }>()
+
+  function formatProbeClassification(classification: string): string {
+    const label = translateDiagnosticCodeLabel($i18n.language, classification)
+    return label === classification ? classification : `${label} (${classification})`
+  }
 </script>
 
 <aside class="diagnostics">
   <div class="diagnostic-item__head">
     <div>
-      <p class="eyebrow">Diagnostics</p>
-      <h2 class="section-title">Structured status</h2>
+      <p class="eyebrow">{$i18n.t('diagnostics.title')}</p>
+      <h2 class="section-title">{$i18n.t('diagnostics.structuredStatus')}</h2>
     </div>
     {#if isOpen}
-      <button class="ghost-button" on:click={() => dispatch('close')}>Hide panel</button>
+      <button class="ghost-button" on:click={() => dispatch('close')}>{$i18n.t('common.hide')}</button>
     {/if}
   </div>
 
   <div class="stack">
     <div class="card list-block">
-      <h4>Probe status</h4>
+      <h4>{$i18n.t('diagnostics.probeStatus')}</h4>
       <p>
         {#if probe.pending}
-          Wails event bridge probe in progress.
+          {$i18n.t('diagnostics.probeInProgress')}
         {:else if probe.error}
           {probe.error}
         {:else if probe.lastAcknowledgement}
-          {probe.lastAcknowledgement.classification}
+          {formatProbeClassification(probe.lastAcknowledgement.classification)}
         {:else}
-          Probe has not run yet.
+          {$i18n.t('diagnostics.probeNotRun')}
         {/if}
       </p>
     </div>
 
     <div class="card list-block">
-      <h4>Contract guard</h4>
+      <h4>{$i18n.t('diagnostics.contractGuard')}</h4>
       {#if mismatch.length === 0}
-        <div class="empty-state">Frontend and backend manifests match.</div>
+        <div class="empty-state">{$i18n.t('diagnostics.manifestsMatch')}</div>
       {:else}
         <ul>
           {#each mismatch as issue}
@@ -56,7 +67,7 @@
     {#if isOpen}
       <div class="stack">
         {#if diagnostics.length === 0}
-          <div class="empty-state">No diagnostics captured yet.</div>
+          <div class="empty-state">{$i18n.t('diagnostics.emptyCaptured')}</div>
         {:else}
           {#each diagnostics as diagnostic}
             <article class="diagnostic-item">
@@ -64,13 +75,17 @@
                 <strong>{diagnostic.code}</strong>
                 <span class="diagnostic-item__meta">{diagnostic.ts}</span>
               </div>
-              <div>{diagnostic.message}</div>
+              <div>{translateDiagnosticMessage($i18n.language, diagnostic.code, diagnostic.message)}</div>
               {#if diagnostic.nextStep}
-                <div class="subtle">Next step: {diagnostic.nextStep}</div>
+                <div class="subtle">
+                  {$i18n.t('diagnostics.nextStep', {
+                    step: translateDiagnosticNextStep($i18n.language, diagnostic.code, diagnostic.nextStep),
+                  })}
+                </div>
               {/if}
               {#if diagnostic.details}
                 <div class="table-like">
-                  {#each getDiagnosticContextRows(diagnostic.details) as detail}
+                  {#each getDiagnosticContextRows(diagnostic.details, $i18n.language) as detail}
                     <div class="table-row">
                       <strong>{detail.label}</strong>
                       <span>{detail.value}</span>
@@ -84,10 +99,9 @@
       </div>
     {:else}
       <div class="card list-block">
-        <h4>Overlay behavior</h4>
+        <h4>{$i18n.t('diagnostics.overlayTitle')}</h4>
         <p>
-          Diagnostics remain wired in the app shell, but the detailed event feed opens only when the
-          diagnostics overlay is active.
+          {$i18n.t('diagnostics.overlayCopy')}
         </p>
       </div>
     {/if}

@@ -94,6 +94,7 @@ type GRPCRuntime interface {
 	InvokeUnary(ctx context.Context, conn GRPCClientConn, request UnaryInvokeRequest) (UnaryInvokeResult, *endpointDiagnostic)
 	StartServerStream(ctx context.Context, conn GRPCClientConn, request ServerStreamStartRequest) (ServerStreamStartResult, *endpointDiagnostic)
 	ConsumeServerStream(request ServerStreamConsumeRequest) (ServerStreamConsumeResult, *endpointDiagnostic)
+	InvokeClientStream(ctx context.Context, conn GRPCClientConn, request ClientStreamInvokeRequest) (ClientStreamInvokeResult, *endpointDiagnostic)
 }
 
 type MethodCatalog struct {

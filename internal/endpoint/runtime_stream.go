@@ -57,6 +57,34 @@ type ServerStreamConsumeResult struct {
 	FinishedAt    time.Time
 }
 
+type ClientStreamInvokeRequest struct {
+	Method         contracts.CatalogMethod
+	Descriptor     protoreflect.MethodDescriptor
+	Metadata       map[string]string
+	Messages       []any
+	RequestTimeout time.Duration
+	OnMessageSent  func(ClientStreamSentMessage)
+	OnHalfClose    func(time.Time)
+}
+
+type ClientStreamSentMessage struct {
+	Body      any
+	Index     int
+	SizeBytes int64
+	SentAt    time.Time
+}
+
+type ClientStreamInvokeResult struct {
+	ResponseBody  any
+	Headers       map[string][]string
+	Trailers      map[string][]string
+	Status        contracts.StreamStatus
+	RequestCount  int
+	ResponseCount int
+	FinishedAt    time.Time
+	Duration      time.Duration
+}
+
 func (r *grpcRuntime) StartServerStream(ctx context.Context, conn GRPCClientConn, request ServerStreamStartRequest) (ServerStreamStartResult, *endpointDiagnostic) {
 	requestMessage, requestDiagnostic := buildUnaryRequestMessage(request.Descriptor.Input(), request.Body)
 	if requestDiagnostic != nil {
@@ -166,6 +194,102 @@ func (r *grpcRuntime) ConsumeServerStream(request ServerStreamConsumeRequest) (S
 	}
 }
 
+func (r *grpcRuntime) InvokeClientStream(ctx context.Context, conn GRPCClientConn, request ClientStreamInvokeRequest) (ClientStreamInvokeResult, *endpointDiagnostic) {
+	startedAt := time.Now()
+	callCtx := ctx
+	if len(request.Metadata) > 0 {
+		callCtx = metadata.NewOutgoingContext(callCtx, metadata.New(request.Metadata))
+	}
+
+	var cancel context.CancelFunc
+	if request.RequestTimeout > 0 {
+		callCtx, cancel = context.WithTimeout(callCtx, request.RequestTimeout)
+		defer cancel()
+	}
+
+	stream, err := conn.NewStream(
+		callCtx,
+		&grpc.StreamDesc{ClientStreams: true},
+		grpcMethodPath(request.Descriptor),
+	)
+	if err != nil {
+		return ClientStreamInvokeResult{Duration: time.Since(startedAt), FinishedAt: time.Now().UTC()}, classifyClientStreamError(request.Method, err)
+	}
+
+	for index, body := range request.Messages {
+		requestMessage, requestDiagnostic := buildUnaryRequestMessage(request.Descriptor.Input(), body)
+		if requestDiagnostic != nil {
+			return ClientStreamInvokeResult{RequestCount: index, Duration: time.Since(startedAt), FinishedAt: time.Now().UTC()}, requestDiagnostic
+		}
+
+		if err := stream.SendMsg(requestMessage); err != nil {
+			result := clientStreamErrorResult(stream, nil, err)
+			result.RequestCount = index
+			result.Duration = time.Since(startedAt)
+			return result, classifyClientStreamError(request.Method, err)
+		}
+
+		sent := ClientStreamSentMessage{
+			Body:      body,
+			Index:     index,
+			SizeBytes: measureJSONSize(body),
+			SentAt:    time.Now().UTC(),
+		}
+		if request.OnMessageSent != nil {
+			request.OnMessageSent(sent)
+		}
+	}
+
+	if err := stream.CloseSend(); err != nil {
+		result := clientStreamErrorResult(stream, nil, err)
+		result.RequestCount = len(request.Messages)
+		result.Duration = time.Since(startedAt)
+		return result, classifyClientStreamError(request.Method, err)
+	}
+	if request.OnHalfClose != nil {
+		request.OnHalfClose(time.Now().UTC())
+	}
+
+	headers, headerErr := stream.Header()
+	clonedHeaders := cloneMetadataValues(headers)
+	if headerErr != nil {
+		result := clientStreamErrorResult(stream, clonedHeaders, headerErr)
+		result.RequestCount = len(request.Messages)
+		result.Duration = time.Since(startedAt)
+		return result, classifyClientStreamError(request.Method, headerErr)
+	}
+
+	responseMessage := dynamicpb.NewMessage(request.Descriptor.Output())
+	if err := stream.RecvMsg(responseMessage); err != nil {
+		result := clientStreamErrorResult(stream, clonedHeaders, err)
+		result.RequestCount = len(request.Messages)
+		result.Duration = time.Since(startedAt)
+		return result, classifyClientStreamError(request.Method, err)
+	}
+
+	responseBody, responseDiagnostic := marshalMessageJSONValue(responseMessage)
+	if responseDiagnostic != nil {
+		return ClientStreamInvokeResult{
+			Headers:      clonedHeaders,
+			Trailers:     cloneMetadataValues(stream.Trailer()),
+			RequestCount: len(request.Messages),
+			FinishedAt:   time.Now().UTC(),
+			Duration:     time.Since(startedAt),
+		}, responseDiagnostic
+	}
+
+	return ClientStreamInvokeResult{
+		ResponseBody:  responseBody,
+		Headers:       clonedHeaders,
+		Trailers:      cloneMetadataValues(stream.Trailer()),
+		Status:        contracts.StreamStatus{Code: codes.OK.String()},
+		RequestCount:  len(request.Messages),
+		ResponseCount: 1,
+		FinishedAt:    time.Now().UTC(),
+		Duration:      time.Since(startedAt),
+	}, nil
+}
+
 type serverStreamIdleMonitor struct {
 	timer    *time.Timer
 	timeout  time.Duration
@@ -216,6 +340,32 @@ func serverStreamErrorResult(stream grpc.ClientStream, headers map[string][]stri
 		Headers:    headers,
 		Trailers:   cloneMetadataValues(stream.Trailer()),
 		FinishedAt: time.Now().UTC(),
+	}
+	if grpcStatus, ok := status.FromError(err); ok {
+		result.Status = contracts.StreamStatus{
+			Code:    grpcStatus.Code().String(),
+			Message: grpcStatus.Message(),
+		}
+		return result
+	}
+
+	if errors.Is(err, context.Canceled) {
+		result.Status = contracts.StreamStatus{
+			Code:    codes.Canceled.String(),
+			Message: err.Error(),
+		}
+	}
+
+	return result
+}
+
+func clientStreamErrorResult(stream grpc.ClientStream, headers map[string][]string, err error) ClientStreamInvokeResult {
+	result := ClientStreamInvokeResult{
+		Headers:    headers,
+		FinishedAt: time.Now().UTC(),
+	}
+	if stream != nil {
+		result.Trailers = cloneMetadataValues(stream.Trailer())
 	}
 	if grpcStatus, ok := status.FromError(err); ok {
 		result.Status = contracts.StreamStatus{
@@ -315,6 +465,94 @@ func classifyServerStreamError(method contracts.CatalogMethod, err error) *endpo
 		Code:     "transport.stream_failed",
 		Category: contracts.ErrorCategoryTransport,
 		Message:  "The server-streaming call failed before a gRPC status could be returned.",
+		NextStep: "Retry the call after checking transport connectivity, endpoint readiness and local runtime errors.",
+		Details: map[string]string{
+			"method": method.FullName,
+			"cause":  err.Error(),
+		},
+	}
+}
+
+func classifyClientStreamError(method contracts.CatalogMethod, err error) *endpointDiagnostic {
+	if errors.Is(err, context.Canceled) {
+		return &endpointDiagnostic{
+			Level:    "info",
+			Code:     "cancelled.stream_cancelled",
+			Category: contracts.ErrorCategoryCancelled,
+			Message:  "The client-streaming call was cancelled by the user.",
+			NextStep: "Start the stream again if the static sequence should be sent.",
+			Details: map[string]string{
+				"method": method.FullName,
+				"cause":  err.Error(),
+			},
+		}
+	}
+
+	if grpcStatus, ok := status.FromError(err); ok {
+		statusCode := grpcStatus.Code().String()
+		if grpcStatus.Code() == codes.Canceled {
+			return &endpointDiagnostic{
+				Level:    "info",
+				Code:     "cancelled.stream_cancelled",
+				Category: contracts.ErrorCategoryCancelled,
+				Message:  "The client-streaming call was cancelled by the user.",
+				NextStep: "Start the stream again if the static sequence should be sent.",
+				Details: map[string]string{
+					"method":         method.FullName,
+					"grpcStatusCode": statusCode,
+					"cause":          grpcStatus.Message(),
+				},
+			}
+		}
+
+		if isTransportLikeUnaryError(grpcStatus) {
+			return &endpointDiagnostic{
+				Level:    "error",
+				Code:     "transport.stream_failed",
+				Category: contracts.ErrorCategoryTransport,
+				Message:  "The client-streaming call failed because the transport connection was interrupted.",
+				NextStep: "Retry the call after checking endpoint reachability, proxies and whether the server keeps the gRPC connection open while the client sends messages.",
+				Details: map[string]string{
+					"method":         method.FullName,
+					"grpcStatusCode": statusCode,
+					"cause":          grpcStatus.Message(),
+				},
+			}
+		}
+
+		return &endpointDiagnostic{
+			Level:    "error",
+			Code:     "grpc_status." + grpcStatusCodeIdentifier(statusCode),
+			Category: contracts.ErrorCategoryGRPCStatus,
+			Message:  fmt.Sprintf("The client-streaming call finished with gRPC status %s: %s", statusCode, grpcStatus.Message()),
+			NextStep: "Inspect the returned gRPC status, static message sequence and server-side stream handling rules before retrying.",
+			Details: map[string]string{
+				"method":         method.FullName,
+				"grpcStatusCode": statusCode,
+				"cause":          grpcStatus.Message(),
+			},
+		}
+	}
+
+	if strings.Contains(strings.ToLower(err.Error()), "context canceled") {
+		return &endpointDiagnostic{
+			Level:    "info",
+			Code:     "cancelled.stream_cancelled",
+			Category: contracts.ErrorCategoryCancelled,
+			Message:  "The client-streaming call was cancelled by the user.",
+			NextStep: "Start the stream again if the static sequence should be sent.",
+			Details: map[string]string{
+				"method": method.FullName,
+				"cause":  err.Error(),
+			},
+		}
+	}
+
+	return &endpointDiagnostic{
+		Level:    "error",
+		Code:     "transport.stream_failed",
+		Category: contracts.ErrorCategoryTransport,
+		Message:  "The client-streaming call failed before a gRPC status could be returned.",
 		NextStep: "Retry the call after checking transport connectivity, endpoint readiness and local runtime errors.",
 		Details: map[string]string{
 			"method": method.FullName,

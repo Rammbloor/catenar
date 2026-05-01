@@ -1,6 +1,11 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte'
   import type { BootstrapData } from '../contracts'
+  import {
+    i18n,
+    translateBootstrapSliceSummary,
+    translateViewLabel,
+  } from '../i18n'
 
   export let bootstrap: BootstrapData
   export let contractMismatch: string[]
@@ -13,29 +18,27 @@
 
 <section class="panel">
   <div class="stack">
-    <p class="eyebrow">Slice 0.1</p>
-    <h2 class="section-title">Production shell is live</h2>
+    <p class="eyebrow">{$i18n.t('home.eyebrow')}</p>
+    <h2 class="section-title">{$i18n.t('home.title')}</h2>
     <p class="section-copy">
-      Wails runtime, Svelte 5 shell and diagnostics event bus are wired together before the
-      transport/runtime features arrive in Epic 1.
+      {$i18n.t('home.copy')}
     </p>
   </div>
 
   <div class="grid-cards">
     <article class="card">
-      <h3>App shell</h3>
+      <h3>{$i18n.t('home.appShellTitle')}</h3>
       <p>
-        Four layout regions are active and the frontend is bootstrapped from Go runtime metadata,
-        not hardcoded browser-only assumptions.
+        {$i18n.t('home.appShellCopy')}
       </p>
     </article>
     <article class="card">
-      <h3>Contract guard</h3>
+      <h3>{$i18n.t('home.contractGuardTitle')}</h3>
       <p>
         {#if contractMismatch.length === 0}
-          Frontend and backend identifiers match the v1 contract manifest.
+          {$i18n.t('home.contractMatch')}
         {:else}
-          Contract drift detected and blocked by startup verification.
+          {$i18n.t('home.contractDrift')}
         {/if}
       </p>
     </article>
@@ -43,24 +46,27 @@
 
   <div class="two-column">
     <div class="list-block card">
-      <h4>Epic 0 slices</h4>
+      <h4>{$i18n.t('home.slices')}</h4>
       <ul>
         {#each bootstrap.epicZero as slice}
-          <li><strong>{slice.slice}</strong> — {slice.summary}</li>
+          <li>
+            <strong>{slice.slice}</strong>
+            — {translateBootstrapSliceSummary($i18n.language, slice.slice, slice.summary)}
+          </li>
         {/each}
       </ul>
     </div>
 
     <div class="list-block card">
-      <h4>Primary flow</h4>
+      <h4>{$i18n.t('home.primaryFlow')}</h4>
       <div class="pill-row">
         {#each bootstrap.stateModel.primaryFlow as step}
-          <span class="pill">{step}</span>
+          <span class="pill">{translateViewLabel($i18n.language, step)}</span>
         {/each}
       </div>
       <div class="pill-row">
-        <button class="ghost-button" on:click={() => dispatch('openworkspace')}>Open workspace shell</button>
-        <button class="ghost-button" on:click={() => dispatch('opensession')}>Open session shell</button>
+        <button class="ghost-button" on:click={() => dispatch('openworkspace')}>{$i18n.t('home.openWorkspace')}</button>
+        <button class="ghost-button" on:click={() => dispatch('opensession')}>{$i18n.t('home.openSession')}</button>
       </div>
     </div>
   </div>

@@ -3,6 +3,8 @@ package endpoint
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -59,16 +61,22 @@ func TestCatalogLoadFromReflectionPlaintextSuccess(t *testing.T) {
 		t.Fatalf("unexpected service catalog: %+v", serviceCatalog)
 	}
 
-	if len(serviceCatalog.Methods) != 2 {
-		t.Fatalf("expected two reflected methods, got %+v", serviceCatalog.Methods)
+	if len(serviceCatalog.Methods) != 3 {
+		t.Fatalf("expected three reflected methods, got %+v", serviceCatalog.Methods)
 	}
 
 	if serviceCatalog.Methods[0].RPCType != contracts.RPCTypeUnary {
 		t.Fatalf("expected unary method metadata, got %+v", serviceCatalog.Methods[0])
 	}
 
-	if serviceCatalog.Methods[1].RPCType != contracts.RPCTypeServerStream {
-		t.Fatalf("expected server-stream metadata, got %+v", serviceCatalog.Methods[1])
+	watchMethod := findCatalogMethod(t, response.Data.Services, "tether.demo.v1.ReflectionDemo.Watch")
+	if watchMethod.RPCType != contracts.RPCTypeServerStream {
+		t.Fatalf("expected server-stream metadata, got %+v", watchMethod)
+	}
+
+	uploadMethod := findCatalogMethod(t, response.Data.Services, "tether.demo.v1.ReflectionDemo.Upload")
+	if uploadMethod.RPCType != contracts.RPCTypeClientStream {
+		t.Fatalf("expected client-stream metadata, got %+v", uploadMethod)
 	}
 
 	assertWellKnownTypes(t, response.Data.WellKnownTypes, []string{
@@ -210,6 +218,8 @@ type reflectionCatalogServerOptions struct {
 	watchSendDelay        time.Duration
 	watchStatusCode       codes.Code
 	watchStatusMessage    string
+	uploadStatusCode      codes.Code
+	uploadStatusMessage   string
 }
 
 type reflectionDemoMarker interface {
@@ -222,6 +232,8 @@ type reflectionDemoService struct {
 	watchSendDelay        time.Duration
 	watchStatusCode       codes.Code
 	watchStatusMessage    string
+	uploadStatusCode      codes.Code
+	uploadStatusMessage   string
 }
 
 func (reflectionDemoService) isReflectionDemo() {}
@@ -318,6 +330,52 @@ var reflectionDemoServiceDesc = grpc.ServiceDesc{
 				return nil
 			},
 		},
+		{
+			StreamName:    "Upload",
+			ClientStreams: true,
+			Handler: func(service any, stream grpc.ServerStream) error {
+				demoService, _ := service.(reflectionDemoService)
+				if err := grpc.SetHeader(stream.Context(), metadata.Pairs(
+					"x-reflection-demo", "upload",
+				)); err != nil {
+					return err
+				}
+				if err := grpc.SetTrailer(stream.Context(), metadata.Pairs(
+					"x-reflection-demo-trailer", "upload-ok",
+				)); err != nil {
+					return err
+				}
+
+				var count int
+				var sum int64
+				for {
+					request := &timestamppb.Timestamp{}
+					err := stream.RecvMsg(request)
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					if err != nil {
+						return err
+					}
+					count++
+					sum += request.Seconds
+				}
+
+				if demoService.uploadStatusCode != codes.OK {
+					return status.Error(demoService.uploadStatusCode, demoService.uploadStatusMessage)
+				}
+
+				response, err := structpb.NewStruct(map[string]any{
+					"count":      float64(count),
+					"sumSeconds": float64(sum),
+				})
+				if err != nil {
+					return err
+				}
+
+				return stream.SendMsg(response)
+			},
+		},
 	},
 }
 
@@ -341,6 +399,8 @@ func startReflectionCatalogServer(t *testing.T, options reflectionCatalogServerO
 		watchSendDelay:        options.watchSendDelay,
 		watchStatusCode:       options.watchStatusCode,
 		watchStatusMessage:    options.watchStatusMessage,
+		uploadStatusCode:      options.uploadStatusCode,
+		uploadStatusMessage:   options.uploadStatusMessage,
 	})
 
 	if !options.disableReflection {
@@ -389,6 +449,12 @@ func buildReflectionCatalogResolver(t *testing.T) protodesc.Resolver {
 						InputType:       proto.String(".google.protobuf.Empty"),
 						OutputType:      proto.String(".google.protobuf.Timestamp"),
 						ServerStreaming: proto.Bool(true),
+					},
+					{
+						Name:            proto.String("Upload"),
+						InputType:       proto.String(".google.protobuf.Timestamp"),
+						OutputType:      proto.String(".google.protobuf.Struct"),
+						ClientStreaming: proto.Bool(true),
 					},
 				},
 			},

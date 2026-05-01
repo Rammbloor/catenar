@@ -150,7 +150,7 @@ func (a *App) CallInvokeUnary(input contracts.CallInvokeUnaryInput) contracts.Ca
 	return a.endpoint.CallInvokeUnary(a.ctx, input)
 }
 
-// CallStartStream starts a server-streaming RPC and emits live session updates through the event bus.
+// CallStartStream starts a server-streaming RPC or a client-streaming static sequence and emits live session updates.
 func (a *App) CallStartStream(input contracts.CallStartStreamInput) contracts.CallStartStreamResponse {
 	if a.ctx == nil {
 		return contracts.CallStartStreamResponse{

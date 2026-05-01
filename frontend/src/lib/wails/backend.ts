@@ -60,6 +60,7 @@ export class BackendResponseError extends Error {
   code?: string
   category?: ErrorCategory
   details?: Record<string, string>
+  backendMessage: string
 
   constructor(error: {
     code?: string
@@ -72,6 +73,7 @@ export class BackendResponseError extends Error {
     this.code = error.code
     this.category = error.category
     this.details = error.details
+    this.backendMessage = error.message
   }
 }
 

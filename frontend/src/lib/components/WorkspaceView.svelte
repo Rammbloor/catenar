@@ -15,6 +15,7 @@
     ProtoCatalogResult,
     ReflectionCatalogResult,
     RequestSaveResult,
+    StreamMessage,
     StreamCompletedEvent,
     StreamErrorEvent,
     StreamEventRecord,
@@ -25,6 +26,14 @@
     WorkspaceValidationIssue,
   } from '../contracts'
   import { getDiagnosticContextRows } from '../diagnostics'
+  import {
+    i18n,
+    translateDiagnosticMessage,
+    translateEndpointCheckMessage,
+    translateEndpointCheckOutcome,
+    translateEndpointCheckStage,
+    translateStreamStateLabel,
+  } from '../i18n'
   import {
     BackendResponseError,
     cancelStream,
@@ -146,10 +155,11 @@
       }
       streamCompleted = payload
       streamState = payload.finalState
+      const rpcType = streamStartResult?.rpcType ? formatRpcType(streamStartResult.rpcType) : $i18n.t('footer.stream')
       infoMessage =
         payload.finalState === 'closed'
-          ? `Server stream saved to history as ${payload.callId}.`
-          : `Server stream finished as ${payload.finalState} with ${payload.status.code}.`
+          ? $i18n.t('stream.completedClosed', { rpcType, callId: payload.callId })
+          : $i18n.t('stream.completedOther', { rpcType, state: payload.finalState, status: payload.status.code })
       void refreshHistory()
       void loadHistoryDetail(payload.callId)
     })
@@ -162,7 +172,7 @@
     }
   })
 
-  $: actionErrorContextRows = getDiagnosticContextRows(actionErrorDetails)
+  $: actionErrorContextRows = getDiagnosticContextRows(actionErrorDetails, $i18n.language)
 
   function buildEndpointPreset(): EndpointPreset {
     const tlsMode = endpoint.tls.mode
@@ -281,7 +291,15 @@
   }
 
   function formatRpcType(rpcType: CatalogMethod['rpcType']): string {
-    return rpcType.replaceAll('_', ' ')
+    return $i18n.t(`method.rpc.${rpcType}`)
+  }
+
+  function formatCatalogSource(kind: CatalogSourceKind): string {
+    return $i18n.t(`source.${kind}`)
+  }
+
+  function formatTLSMode(mode: TLSMode): string {
+    return $i18n.t(`tls.${mode}`)
   }
 
   function isTLSMode(mode: TLSMode): boolean {
@@ -300,9 +318,17 @@
     return JSON.stringify(value, null, 2)
   }
 
-  function restoreTemplateDraft(method: CatalogMethod): void {
+  function defaultDraftForMethod(method: CatalogMethod): string {
     const template = activeCatalog?.requestTemplates?.[method.fullName]
-    requestBodyText = formatJsonValue(template)
+    if (method.rpcType === 'client_stream') {
+      return formatJsonValue([template ?? {}])
+    }
+
+    return formatJsonValue(template)
+  }
+
+  function restoreTemplateDraft(method: CatalogMethod): void {
+    requestBodyText = defaultDraftForMethod(method)
     requestBodyError = ''
     const key = methodDraftKey(method)
     bodyDrafts = {
@@ -322,7 +348,7 @@
     metadataError = ''
 
     const key = methodDraftKey(method)
-    requestBodyText = bodyDrafts[key] ?? formatJsonValue(activeCatalog?.requestTemplates?.[method.fullName])
+    requestBodyText = bodyDrafts[key] ?? defaultDraftForMethod(method)
     metadataText = metadataDrafts[key] ?? '{}'
   }
 
@@ -352,7 +378,28 @@
     try {
       return JSON.parse(requestBodyText) as JsonValue
     } catch (error) {
-      requestBodyError = error instanceof Error ? error.message : 'Request body must be valid JSON.'
+      requestBodyError = error instanceof Error ? error.message : $i18n.t('errors.requestBodyJson')
+      return null
+    }
+  }
+
+  function parseClientStreamMessages(): StreamMessage[] | null {
+    requestBodyError = ''
+
+    try {
+      const parsed = JSON.parse(requestBodyText) as JsonValue
+      if (!Array.isArray(parsed)) {
+        requestBodyError = $i18n.t('errors.clientStreamMessagesArray')
+        return null
+      }
+      if (parsed.length === 0) {
+        requestBodyError = $i18n.t('errors.clientStreamMessagesRequired')
+        return null
+      }
+
+      return parsed.map((body) => ({ body }))
+    } catch (error) {
+      requestBodyError = error instanceof Error ? error.message : $i18n.t('errors.requestBodyJson')
       return null
     }
   }
@@ -363,7 +410,7 @@
     try {
       const parsed = JSON.parse(metadataText) as JsonValue
       if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
-        metadataError = 'Metadata overrides must be a JSON object with string values.'
+        metadataError = $i18n.t('errors.metadataObject')
         return null
       }
 
@@ -371,7 +418,7 @@
       const result: Record<string, string> = {}
       for (const [key, value] of metadataEntries) {
         if (typeof value !== 'string') {
-          metadataError = `Metadata value for "${key}" must be a string.`
+          metadataError = $i18n.t('errors.metadataStringValue', { key })
           return null
         }
         result[key] = value
@@ -379,7 +426,7 @@
 
       return result
     } catch (error) {
-      metadataError = error instanceof Error ? error.message : 'Metadata overrides must be valid JSON.'
+      metadataError = error instanceof Error ? error.message : $i18n.t('errors.metadataValidJson')
       return null
     }
   }
@@ -403,7 +450,10 @@
 
   function setActionError(error: unknown, fallback: string): void {
     if (error instanceof BackendResponseError) {
-      actionError = error.message
+      const translated = error.code
+        ? translateDiagnosticMessage($i18n.language, error.code, error.backendMessage)
+        : error.backendMessage
+      actionError = error.code ? `${error.code}: ${translated}` : translated
       actionErrorDetails = error.details
       return
     }
@@ -412,10 +462,16 @@
     actionErrorDetails = undefined
   }
 
-  function setWorkspaceResultMessage(snapshot: WorkspaceSnapshot, action: string): void {
+  function setWorkspaceResultMessage(snapshot: WorkspaceSnapshot, messageKey: string): void {
     const backupSuffix =
-      snapshot.backupPaths && snapshot.backupPaths.length > 0 ? ` Backup: ${snapshot.backupPaths[0]}.` : ''
-    infoMessage = `${action} ${snapshot.name} at ${snapshot.manifestPath}.${backupSuffix}`
+      snapshot.backupPaths && snapshot.backupPaths.length > 0
+        ? $i18n.t('workspace.backupSuffix', { path: snapshot.backupPaths[0] })
+        : ''
+    infoMessage = $i18n.t(messageKey, {
+      name: snapshot.name,
+      manifestPath: snapshot.manifestPath,
+      backup: backupSuffix,
+    })
   }
 
   async function runWorkspaceCreate(): Promise<void> {
@@ -430,9 +486,9 @@
         ...buildWorkspaceSaveInput(),
       })
       applyWorkspaceSnapshot(result.workspace)
-      setWorkspaceResultMessage(result.workspace, 'Created workspace')
+      setWorkspaceResultMessage(result.workspace, 'workspace.created')
     } catch (error) {
-      setActionError(error, 'Workspace could not be created.')
+      setActionError(error, $i18n.t('errors.workspaceCreate'))
     } finally {
       workspacePending = false
     }
@@ -450,9 +506,9 @@
       activeCatalog = null
       selectedMethod = null
       invokeResult = null
-      setWorkspaceResultMessage(result.workspace, 'Opened workspace')
+      setWorkspaceResultMessage(result.workspace, 'workspace.opened')
     } catch (error) {
-      setActionError(error, 'Workspace could not be opened.')
+      setActionError(error, $i18n.t('errors.workspaceOpen'))
     } finally {
       workspacePending = false
     }
@@ -467,9 +523,9 @@
     try {
       const result = await saveWorkspace(buildWorkspaceSaveInput())
       applyWorkspaceSnapshot(result.workspace)
-      setWorkspaceResultMessage(result.workspace, 'Saved workspace')
+      setWorkspaceResultMessage(result.workspace, 'workspace.saved')
     } catch (error) {
-      setActionError(error, 'Workspace could not be saved.')
+      setActionError(error, $i18n.t('errors.workspaceSave'))
     } finally {
       workspacePending = false
     }
@@ -486,10 +542,10 @@
       workspaceIssues = result.issues
       infoMessage =
         result.issues.length === 0
-          ? 'Workspace draft passed open/save validation.'
-          : `Workspace draft has ${result.issues.length} validation issue${result.issues.length === 1 ? '' : 's'}.`
+          ? $i18n.t('workspace.validationPassed')
+          : $i18n.t('workspace.validationIssues', { count: result.issues.length })
     } catch (error) {
-      setActionError(error, 'Workspace could not be validated.')
+      setActionError(error, $i18n.t('errors.workspaceValidate'))
     } finally {
       workspacePending = false
     }
@@ -502,7 +558,7 @@
       historyDetail = await getHistory(callId)
     } catch (error) {
       historyDetail = null
-      setActionError(error, 'History detail could not be loaded.')
+      setActionError(error, $i18n.t('errors.historyDetail'))
     } finally {
       historyDetailPending = false
     }
@@ -518,7 +574,7 @@
       endpointTestResult = await testEndpoint({ endpoint: buildEndpointPreset() })
       applyEndpointPreset(endpointTestResult.endpoint)
     } catch (error) {
-      setActionError(error, 'Endpoint preflight failed unexpectedly.')
+      setActionError(error, $i18n.t('errors.endpointPreflight'))
     } finally {
       testPending = false
     }
@@ -561,7 +617,7 @@
       await refreshHistory()
     } catch (error) {
       activeCatalog = null
-      setActionError(error, 'Reflection catalog load failed unexpectedly.')
+      setActionError(error, $i18n.t('errors.reflectionCatalog'))
     } finally {
       reflectionPending = false
     }
@@ -578,7 +634,7 @@
     const protoSources = buildProtoSources()
 
     if (protoSources.length === 0) {
-      actionError = 'Add at least one proto directory or file before loading the proto catalog.'
+      actionError = $i18n.t('errors.addProtoSource')
       actionErrorDetails = undefined
       return
     }
@@ -605,7 +661,7 @@
       await refreshHistory()
     } catch (error) {
       activeCatalog = null
-      setActionError(error, 'Proto catalog load failed unexpectedly.')
+      setActionError(error, $i18n.t('errors.protoCatalog'))
     } finally {
       protoPending = false
     }
@@ -613,7 +669,7 @@
 
   async function runUnaryInvoke(): Promise<void> {
     if (!activeCatalog || !selectedMethod) {
-      actionError = 'Select a method from the loaded catalog before invoking.'
+      actionError = $i18n.t('errors.selectMethodInvoke')
       actionErrorDetails = undefined
       return
     }
@@ -624,7 +680,7 @@
     clearStreamView()
 
     if (selectedMethod.rpcType !== 'unary') {
-      actionError = 'This invoke surface is still unary-only. Pick a unary method from the catalog.'
+      actionError = $i18n.t('errors.unaryOnly')
       actionErrorDetails = undefined
       return
     }
@@ -646,12 +702,12 @@
       })
       infoMessage =
         invokeResult.finalState === 'closed'
-          ? `Unary call saved to history as ${invokeResult.callId}.`
-          : `Unary call completed with ${invokeResult.status.code} and was saved to history as ${invokeResult.callId}.`
+          ? $i18n.t('call.unarySaved', { callId: invokeResult.callId })
+          : $i18n.t('call.unarySavedWithStatus', { status: invokeResult.status.code, callId: invokeResult.callId })
       await refreshHistory()
       await loadHistoryDetail(invokeResult.callId)
     } catch (error) {
-      setActionError(error, 'Unary call failed unexpectedly.')
+      setActionError(error, $i18n.t('errors.unaryInvoke'))
       await refreshHistory()
     } finally {
       invokePending = false
@@ -660,7 +716,7 @@
 
   async function runServerStreamInvoke(): Promise<void> {
     if (!activeCatalog || !selectedMethod) {
-      actionError = 'Select a method from the loaded catalog before starting a stream.'
+      actionError = $i18n.t('errors.selectMethodStream')
       actionErrorDetails = undefined
       return
     }
@@ -671,7 +727,7 @@
     clearStreamView()
 
     if (selectedMethod.rpcType !== 'server_stream') {
-      actionError = 'Slice 3.1 can start server-streaming methods only.'
+      actionError = $i18n.t('errors.streamUnaryOnly')
       actionErrorDetails = undefined
       return
     }
@@ -698,10 +754,60 @@
       streamStartResult = started
       if (!streamCompleted || streamCompleted.sessionId !== started.sessionId) {
         streamState = started.state
-        infoMessage = `Server stream started as ${started.callId}.`
+        infoMessage = $i18n.t('stream.started', { rpcType: formatRpcType(started.rpcType), callId: started.callId })
       }
     } catch (error) {
-      setActionError(error, 'Server stream could not be started.')
+      setActionError(error, $i18n.t('errors.streamStart'))
+      await refreshHistory()
+    } finally {
+      streamPending = false
+    }
+  }
+
+  async function runClientStreamInvoke(): Promise<void> {
+    if (!activeCatalog || !selectedMethod) {
+      actionError = $i18n.t('errors.selectMethodStream')
+      actionErrorDetails = undefined
+      return
+    }
+
+    clearActionError()
+    infoMessage = ''
+    invokeResult = null
+    clearStreamView()
+
+    if (selectedMethod.rpcType !== 'client_stream') {
+      actionError = $i18n.t('errors.streamUnaryOnly')
+      actionErrorDetails = undefined
+      return
+    }
+
+    const messages = parseClientStreamMessages()
+    const metadata = parseMetadataText()
+    if (messages === null || metadata === null) {
+      return
+    }
+
+    streamPending = true
+    try {
+      const started = await startStream({
+        catalogSource: activeCatalog.kind,
+        endpointId: activeCatalog.endpoint.id ?? '',
+        method: selectedMethod.fullName,
+        rpcType: selectedMethod.rpcType,
+        metadata,
+        requestSpec: {
+          mode: 'static-sequence',
+          messages,
+        },
+      })
+      streamStartResult = started
+      if (!streamCompleted || streamCompleted.sessionId !== started.sessionId) {
+        streamState = started.state
+        infoMessage = $i18n.t('stream.started', { rpcType: formatRpcType(started.rpcType), callId: started.callId })
+      }
+    } catch (error) {
+      setActionError(error, $i18n.t('errors.clientStreamStart'))
       await refreshHistory()
     } finally {
       streamPending = false
@@ -717,9 +823,9 @@
     cancelPending = true
     try {
       await cancelStream({ sessionId: streamStartResult.sessionId })
-      infoMessage = `Cancel requested for ${streamStartResult.callId}.`
+      infoMessage = $i18n.t('stream.cancelRequested', { callId: streamStartResult.callId })
     } catch (error) {
-      setActionError(error, 'Stream could not be cancelled.')
+      setActionError(error, $i18n.t('errors.streamCancel'))
     } finally {
       cancelPending = false
     }
@@ -731,7 +837,7 @@
 
   async function runRequestSave(): Promise<void> {
     if (!activeCatalog || !selectedMethod) {
-      actionError = 'Select a loaded method before saving a reusable request.'
+      actionError = $i18n.t('errors.requestSaveLoadedMethod')
       actionErrorDetails = undefined
       return
     }
@@ -740,7 +846,7 @@
     infoMessage = ''
 
     if (selectedMethod.rpcType !== 'unary') {
-      actionError = 'Saved request persistence is wired to the unary request composer in this slice.'
+      actionError = $i18n.t('errors.requestSaveUnaryOnly')
       actionErrorDetails = undefined
       return
     }
@@ -766,9 +872,9 @@
       })
       applyWorkspaceSnapshot(result.workspace)
       savedRequestId = result.savedRequest.id
-      infoMessage = `Saved request ${result.savedRequest.id} to ${result.savedRequest.path}.`
+      infoMessage = $i18n.t('call.requestSaved', { id: result.savedRequest.id, path: result.savedRequest.path })
     } catch (error) {
-      setActionError(error, 'Request could not be saved.')
+      setActionError(error, $i18n.t('errors.requestSave'))
     } finally {
       requestSavePending = false
     }
@@ -779,6 +885,10 @@
       event.preventDefault()
       if (selectedMethod?.rpcType === 'server_stream') {
         void runServerStreamInvoke()
+        return
+      }
+      if (selectedMethod?.rpcType === 'client_stream') {
+        void runClientStreamInvoke()
         return
       }
       void runUnaryInvoke()
@@ -795,7 +905,7 @@
 
   function formatTimestamp(value: string | undefined): string {
     if (!value) {
-      return 'n/a'
+      return $i18n.t('common.notAvailable')
     }
 
     return new Date(value).toLocaleString()
@@ -825,68 +935,88 @@
     return state === 'closed' || state === 'cancelled' || state === 'error'
   }
 
+  function supportsStaticComposer(method: CatalogMethod): boolean {
+    return method.rpcType === 'unary' || method.rpcType === 'server_stream' || method.rpcType === 'client_stream'
+  }
+
+  function bodyEditorLabel(method: CatalogMethod): string {
+    return method.rpcType === 'client_stream' ? $i18n.t('request.clientSequenceJson') : $i18n.t('request.bodyJson')
+  }
+
   function formatStreamEventPreview(event: StreamEventRecord): string {
     return formatJsonValue(event.payload.preview.json)
+  }
+
+  function formatCheckStage(stage: string): string {
+    return translateEndpointCheckStage($i18n.language, stage)
+  }
+
+  function formatCheckOutcome(outcome: string): string {
+    return translateEndpointCheckOutcome($i18n.language, outcome)
+  }
+
+  function formatCheckMessage(stage: string, outcome: string, message: string): string {
+    return translateEndpointCheckMessage($i18n.language, stage, outcome, message)
   }
 </script>
 
 <section class="panel">
   <div class="stack">
-    <p class="eyebrow">Slice 3.1</p>
-    <h2 class="section-title">Server streaming</h2>
+    <p class="eyebrow">{$i18n.t('workspaceView.eyebrow')}</p>
+    <h2 class="section-title">{$i18n.t('workspaceView.title')}</h2>
     <p class="section-copy">
-      Reflection and proto-loaded server-streaming methods now use the live event bus, timeline and persisted history artifacts.
+      {$i18n.t('workspaceView.copy')}
     </p>
   </div>
 
   <div class="card stack">
     <div class="card__header">
-      <h3>Workspace file</h3>
+      <h3>{$i18n.t('workspace.fileTitle')}</h3>
       <div class="pill-row">
         <span class="pill" class:pill--accent={activeWorkspace?.version === 1}>
-          {activeWorkspace ? `v${activeWorkspace.version}` : 'not open'}
+          {activeWorkspace ? `v${activeWorkspace.version}` : $i18n.t('common.notOpen')}
         </span>
         {#if activeWorkspace}
-          <span class="pill">{activeWorkspace.savedRequests?.length ?? 0} requests</span>
+          <span class="pill">{$i18n.t('common.requestsCount', { count: activeWorkspace.savedRequests?.length ?? 0 })}</span>
         {/if}
       </div>
     </div>
 
     <div class="form-grid">
       <label class="field">
-        <span>Workspace path</span>
-        <input bind:value={workspacePath} placeholder="/absolute/path/to/workspace" />
+        <span>{$i18n.t('workspace.path')}</span>
+        <input bind:value={workspacePath} placeholder={$i18n.t('workspace.pathPlaceholder')} />
       </label>
 
       <label class="field">
-        <span>Name</span>
-        <input bind:value={workspaceName} placeholder="workspace name" />
+        <span>{$i18n.t('workspace.name')}</span>
+        <input bind:value={workspaceName} placeholder={$i18n.t('workspace.namePlaceholder')} />
       </label>
     </div>
 
     <div class="pill-row">
       <button class="ghost-button" disabled={workspacePending} on:click={runWorkspaceCreate}>
-        {workspacePending ? 'Working…' : 'Create'}
+        {workspacePending ? $i18n.t('common.working') : $i18n.t('common.create')}
       </button>
       <button class="ghost-button" disabled={workspacePending} on:click={runWorkspaceOpen}>
-        {workspacePending ? 'Working…' : 'Open'}
+        {workspacePending ? $i18n.t('common.working') : $i18n.t('common.open')}
       </button>
       <button class="action-button" disabled={workspacePending || !activeWorkspace} on:click={runWorkspaceSave}>
-        {workspacePending ? 'Saving…' : 'Save'}
+        {workspacePending ? $i18n.t('common.saving') : $i18n.t('common.save')}
       </button>
       <button class="ghost-button" disabled={workspacePending || !activeWorkspace} on:click={runWorkspaceValidate}>
-        {workspacePending ? 'Checking…' : 'Validate'}
+        {workspacePending ? $i18n.t('common.checking') : $i18n.t('common.validate')}
       </button>
     </div>
 
     {#if activeWorkspace}
       <div class="table-like">
         <div class="table-row">
-          <strong>Manifest</strong>
+          <strong>{$i18n.t('workspace.manifest')}</strong>
           <span>{activeWorkspace.manifestPath}</span>
         </div>
         <div class="table-row">
-          <strong>Workspace id</strong>
+          <strong>{$i18n.t('workspace.id')}</strong>
           <span>{activeWorkspace.id}</span>
         </div>
       </div>
@@ -921,114 +1051,114 @@
   <div class="two-column reflection-layout">
     <div class="card stack">
       <div class="card__header">
-        <h3>Endpoint</h3>
+        <h3>{$i18n.t('endpoint.title')}</h3>
         <div class="pill-row">
-          <span class="pill pill--accent">{bootstrap.contract.boundMethods.length} bindings</span>
-          <span class="pill">{contractMismatch.length === 0 ? 'contract verified' : 'contract drift'}</span>
+          <span class="pill pill--accent">{$i18n.t('common.bindingsCount', { count: bootstrap.contract.boundMethods.length })}</span>
+          <span class="pill">{contractMismatch.length === 0 ? $i18n.t('common.contractVerified') : $i18n.t('common.contractDrift')}</span>
         </div>
       </div>
 
       <div class="form-grid">
         <label class="field">
-          <span>Target</span>
+          <span>{$i18n.t('endpoint.target')}</span>
           <input bind:value={endpoint.target} placeholder="127.0.0.1:50051" />
         </label>
 
         <label class="field">
-          <span>Authority</span>
-          <input bind:value={endpoint.authority} placeholder="optional override" />
+          <span>{$i18n.t('endpoint.authority')}</span>
+          <input bind:value={endpoint.authority} placeholder={$i18n.t('endpoint.authorityPlaceholder')} />
         </label>
 
         <label class="field">
-          <span>TLS mode</span>
+          <span>{$i18n.t('endpoint.tlsMode')}</span>
           <select bind:value={endpoint.tls.mode}>
-            <option value="plaintext">plaintext</option>
-            <option value="system_ca">system_ca</option>
-            <option value="custom_ca">custom_ca</option>
-            <option value="mtls">mtls</option>
+            <option value="plaintext">{formatTLSMode('plaintext')}</option>
+            <option value="system_ca">{formatTLSMode('system_ca')}</option>
+            <option value="custom_ca">{formatTLSMode('custom_ca')}</option>
+            <option value="mtls">{formatTLSMode('mtls')}</option>
           </select>
         </label>
 
         <label class="field">
-          <span>Server name override</span>
-          <input bind:value={endpoint.tls.serverNameOverride} placeholder="optional SAN override" />
+          <span>{$i18n.t('endpoint.serverNameOverride')}</span>
+          <input bind:value={endpoint.tls.serverNameOverride} placeholder={$i18n.t('endpoint.serverNamePlaceholder')} />
         </label>
 
         <label class="field">
-          <span>Connect timeout (ms)</span>
+          <span>{$i18n.t('endpoint.connectTimeout')}</span>
           <input bind:value={endpoint.connectTimeoutMs} min="1" type="number" />
         </label>
 
         <label class="field">
-          <span>Request timeout (ms)</span>
+          <span>{$i18n.t('endpoint.requestTimeout')}</span>
           <input bind:value={endpoint.requestTimeoutMs} min="0" type="number" />
         </label>
 
         <label class="field">
-          <span>Stream idle timeout (ms)</span>
+          <span>{$i18n.t('endpoint.streamIdleTimeout')}</span>
           <input bind:value={endpoint.streamIdleTimeoutMs} min="0" type="number" />
         </label>
 
         {#if isTLSMode('custom_ca') || isTLSMode('mtls')}
           <label class="field field--span-2">
-            <span>CA secret-ref</span>
+            <span>{$i18n.t('endpoint.caSecretRef')}</span>
             <input bind:value={endpoint.tls.caCert} placeholder="secret-ref:file/tls/ca.pem" />
           </label>
         {/if}
 
         {#if isTLSMode('mtls')}
           <label class="field">
-            <span>Client cert secret-ref</span>
+            <span>{$i18n.t('endpoint.clientCertSecretRef')}</span>
             <input bind:value={endpoint.tls.clientCert} placeholder="secret-ref:file/tls/client.crt" />
           </label>
 
           <label class="field">
-            <span>Client key secret-ref</span>
+            <span>{$i18n.t('endpoint.clientKeySecretRef')}</span>
             <input bind:value={endpoint.tls.clientKey} placeholder="secret-ref:file/tls/client.key" />
           </label>
         {/if}
       </div>
 
       <label class="field">
-        <span>Catalog source</span>
+        <span>{$i18n.t('endpoint.catalogSource')}</span>
         <select bind:value={selectedCatalogMode}>
-          <option value="reflection">reflection</option>
-          <option value="proto">proto sources</option>
+          <option value="reflection">{$i18n.t('source.reflection')}</option>
+          <option value="proto">{$i18n.t('source.proto')}</option>
         </select>
       </label>
 
       {#if selectedCatalogMode === 'proto'}
         <div class="stack">
           <label class="field field--textarea">
-            <span>Proto directories (one per line)</span>
-            <textarea rows="4" bind:value={protoDirectoriesText} placeholder="/absolute/path/to/proto"></textarea>
+            <span>{$i18n.t('endpoint.protoDirectories')}</span>
+            <textarea rows="4" bind:value={protoDirectoriesText} placeholder={$i18n.t('endpoint.protoDirectoriesPlaceholder')}></textarea>
           </label>
 
           <label class="field field--textarea">
-            <span>Proto files (optional, one per line)</span>
-            <textarea rows="4" bind:value={protoFilesText} placeholder="/absolute/path/to/service.proto"></textarea>
+            <span>{$i18n.t('endpoint.protoFiles')}</span>
+            <textarea rows="4" bind:value={protoFilesText} placeholder={$i18n.t('endpoint.protoFilesPlaceholder')}></textarea>
           </label>
 
           <label class="field field--textarea">
-            <span>Import paths (optional, one per line)</span>
-            <textarea rows="4" bind:value={importPathsText} placeholder="/absolute/path/to/import-root"></textarea>
+            <span>{$i18n.t('endpoint.importPaths')}</span>
+            <textarea rows="4" bind:value={importPathsText} placeholder={$i18n.t('endpoint.importPathsPlaceholder')}></textarea>
           </label>
 
-          <div class="subtle">Proto catalogs reload only when you click the button below. File watching is intentionally out of scope for this slice.</div>
+          <div class="subtle">{$i18n.t('endpoint.protoNote')}</div>
         </div>
       {/if}
 
       <div class="pill-row">
         <button class="ghost-button" disabled={testPending || reflectionPending || protoPending || invokePending} on:click={runEndpointTest}>
-          {testPending ? 'Testing endpoint…' : 'Run endpoint preflight'}
+          {testPending ? $i18n.t('endpoint.testPending') : $i18n.t('endpoint.runPreflight')}
         </button>
         {#if selectedCatalogMode === 'reflection'}
           <button class="action-button" disabled={testPending || reflectionPending || protoPending || invokePending} on:click={runReflectionLoad}>
-            {reflectionPending ? 'Loading reflection…' : 'Load reflection catalog'}
+            {reflectionPending ? $i18n.t('endpoint.loadReflectionPending') : $i18n.t('endpoint.loadReflection')}
           </button>
         {:else}
           <button class="action-button" disabled={testPending || reflectionPending || protoPending || invokePending} on:click={runProtoLoad}>
-            {protoPending ? 'Loading proto catalog…' : 'Load proto catalog'}
+            {protoPending ? $i18n.t('endpoint.loadProtoPending') : $i18n.t('endpoint.loadProto')}
           </button>
         {/if}
       </div>
@@ -1046,7 +1176,7 @@
               {/each}
             </div>
           {/if}
-          <div class="subtle">Structured diagnostics still flow into the diagnostics panel when the runtime can classify the failure.</div>
+          <div class="subtle">{$i18n.t('workspace.infoDiagnostics')}</div>
         </div>
       {/if}
 
@@ -1057,19 +1187,19 @@
 
     <div class="stack">
       <div class="card stack">
-        <h3>Transport preflight</h3>
+        <h3>{$i18n.t('endpoint.preflightTitle')}</h3>
         {#if !endpointTestResult}
-          <div class="empty-state">Run endpoint preflight to reuse the Slice 1.1 transport, TLS and gRPC readiness checks.</div>
+          <div class="empty-state">{$i18n.t('endpoint.preflightEmpty')}</div>
         {:else}
           <div class="pill-row">
             <span class="pill" class:pill--accent={endpointTestResult.transportReachable}>
-              transport {endpointTestResult.transportReachable ? 'reachable' : 'blocked'}
+              {$i18n.t('endpoint.transport')} {endpointTestResult.transportReachable ? $i18n.t('endpoint.transportReachable') : $i18n.t('endpoint.transportBlocked')}
             </span>
             <span class="pill" class:pill--accent={endpointTestResult.grpcReadyProven}>
-              gRPC {endpointTestResult.grpcReadyProven ? 'ready' : 'not proven'}
+              gRPC {endpointTestResult.grpcReadyProven ? $i18n.t('endpoint.grpcReady') : $i18n.t('endpoint.grpcBlocked')}
             </span>
             <span class="pill" class:pill--accent={endpointTestResult.tlsOk || !endpointTestResult.tlsConfigured}>
-              TLS {endpointTestResult.tlsConfigured ? (endpointTestResult.tlsOk ? 'ok' : 'failed') : 'off'}
+              TLS {endpointTestResult.tlsConfigured ? (endpointTestResult.tlsOk ? $i18n.t('endpoint.tlsOk') : $i18n.t('endpoint.tlsFailed')) : $i18n.t('endpoint.tlsOff')}
             </span>
           </div>
 
@@ -1077,10 +1207,10 @@
             {#each endpointTestResult.checks as check}
               <article class="diagnostic-item">
                 <div class="diagnostic-item__head">
-                  <strong>{check.stage}</strong>
-                  <span class="diagnostic-item__meta">{check.outcome}</span>
+                  <strong>{formatCheckStage(check.stage)}</strong>
+                  <span class="diagnostic-item__meta">{formatCheckOutcome(check.outcome)}</span>
                 </div>
-                <div>{check.message}</div>
+                <div>{formatCheckMessage(check.stage, check.outcome, check.message)}</div>
               </article>
             {/each}
           </div>
@@ -1089,12 +1219,12 @@
 
       <div class="card stack">
         <div class="card__header">
-          <h3>Recent call history</h3>
-          <span class="pill">{historyPending ? 'refreshing…' : `${historySummaries.length} calls`}</span>
+          <h3>{$i18n.t('history.recentTitle')}</h3>
+          <span class="pill">{historyPending ? $i18n.t('common.refreshing') : $i18n.t('common.callsCount', { count: historySummaries.length })}</span>
         </div>
 
         {#if historySummaries.length === 0}
-          <div class="empty-state">Completed calls will materialize here with persisted summaries and session log artifacts.</div>
+          <div class="empty-state">{$i18n.t('history.empty')}</div>
         {:else}
           <div class="history-list">
             {#each historySummaries as summary}
@@ -1113,11 +1243,11 @@
   <div class="three-column">
     <div class="card stack">
       <div class="card__header">
-        <h3>Method catalog</h3>
+        <h3>{$i18n.t('method.catalogTitle')}</h3>
         {#if activeCatalog}
           <div class="pill-row">
-            <span class="pill pill--accent">{activeCatalog.services.length} services</span>
-            <span class="pill">{activeCatalog.kind}</span>
+            <span class="pill pill--accent">{$i18n.t('common.servicesCount', { count: activeCatalog.services.length })}</span>
+            <span class="pill">{formatCatalogSource(activeCatalog.kind)}</span>
           </div>
         {/if}
       </div>
@@ -1125,9 +1255,9 @@
       {#if !activeCatalog}
         <div class="empty-state">
           {#if selectedCatalogMode === 'reflection'}
-            Load reflection to build the service tree, request templates and RPC metadata that drive the unary flow.
+            {$i18n.t('method.catalogEmptyReflection')}
           {:else}
-            Load local proto sources and import paths to build the same method tree without depending on server reflection.
+            {$i18n.t('method.catalogEmptyProto')}
           {/if}
         </div>
       {:else}
@@ -1139,7 +1269,7 @@
                   <h4>{service.name}</h4>
                   <div class="subtle">{service.fullName}</div>
                 </div>
-                <span class="badge">{service.methods.length} methods</span>
+                <span class="badge">{$i18n.t('common.methodsCount', { count: service.methods.length })}</span>
               </div>
 
               <div class="catalog-methods">
@@ -1151,10 +1281,10 @@
                     </div>
                     <div class="subtle">{method.fullName}</div>
                     <div class="catalog-method__types">
-                      <span>request: <strong>{method.requestType.fullName}</strong></span>
+                      <span>{$i18n.t('method.types.request')} <strong>{method.requestType.fullName}</strong></span>
                     </div>
                     <div class="catalog-method__types">
-                      <span>response: <strong>{method.responseType.fullName}</strong></span>
+                      <span>{$i18n.t('method.types.response')} <strong>{method.responseType.fullName}</strong></span>
                     </div>
                   </button>
                 {/each}
@@ -1167,40 +1297,40 @@
 
     <div class="card stack">
       <div class="card__header">
-        <h3>Request composer</h3>
+        <h3>{$i18n.t('request.composerTitle')}</h3>
         {#if selectedMethod}
-          <span class="pill">{selectedMethod.rpcType}</span>
+          <span class="pill">{formatRpcType(selectedMethod.rpcType)}</span>
         {/if}
       </div>
 
       {#if !selectedMethod}
-        <div class="empty-state">Pick a method from the loaded catalog to materialize the starter JSON payload.</div>
-      {:else if selectedMethod.rpcType !== 'unary' && selectedMethod.rpcType !== 'server_stream'}
+        <div class="empty-state">{$i18n.t('request.empty')}</div>
+      {:else if !supportsStaticComposer(selectedMethod)}
         <div class="empty-state">
-          <strong>{selectedMethod.name}</strong> is {formatRpcType(selectedMethod.rpcType)}.
-          <div class="subtle">Slice 3.1 supports unary and server-streaming methods before widening into client and bidi streaming.</div>
+          <strong>{$i18n.t('request.unsupportedMethod', { method: selectedMethod.name, rpcType: formatRpcType(selectedMethod.rpcType) })}</strong>
+          <div class="subtle">{$i18n.t('request.unsupported')}</div>
         </div>
       {:else}
         <div class="stack">
           <div class="table-like">
             <div class="table-row">
-              <strong>Method</strong>
+              <strong>{$i18n.t('method.method')}</strong>
               <span>{selectedMethod.fullName}</span>
             </div>
             <div class="table-row">
-              <strong>Request type</strong>
+              <strong>{$i18n.t('method.requestType')}</strong>
               <span>{selectedMethod.requestType.fullName}</span>
             </div>
             <div class="table-row">
-              <strong>Response type</strong>
+              <strong>{$i18n.t('method.responseType')}</strong>
               <span>{selectedMethod.responseType.fullName}</span>
             </div>
           </div>
 
           <label class="field field--textarea">
-            <span>Request body JSON</span>
+            <span>{bodyEditorLabel(selectedMethod)}</span>
             <textarea
-              rows="14"
+              rows={selectedMethod.rpcType === 'client_stream' ? 18 : 14}
               value={requestBodyText}
               on:input={(event) => updateBodyDraft((event.currentTarget as HTMLTextAreaElement).value)}
               on:keydown={handleComposerKeydown}
@@ -1211,7 +1341,7 @@
           {/if}
 
           <label class="field field--textarea">
-            <span>Metadata overrides JSON</span>
+            <span>{$i18n.t('request.metadataJson')}</span>
             <textarea
               rows="6"
               value={metadataText}
@@ -1224,45 +1354,58 @@
           {/if}
 
           <label class="field">
-            <span>Saved request id</span>
+            <span>{$i18n.t('request.savedRequestId')}</span>
             <input bind:value={savedRequestId} placeholder={defaultRequestId(selectedMethod)} />
           </label>
 
           <div class="pill-row">
-            <button class="ghost-button" on:click={() => selectedMethod && restoreTemplateDraft(selectedMethod)}>Reset to template</button>
+            <button class="ghost-button" on:click={() => selectedMethod && restoreTemplateDraft(selectedMethod)}>{$i18n.t('request.resetTemplate')}</button>
             {#if selectedMethod.rpcType === 'unary'}
               <button class="ghost-button" disabled={requestSavePending || !activeWorkspace} on:click={runRequestSave}>
-                {requestSavePending ? 'Saving request…' : 'Save request'}
+                {requestSavePending ? $i18n.t('request.saveRequestPending') : $i18n.t('request.saveRequest')}
               </button>
               <button class="action-button" disabled={invokePending || reflectionPending || protoPending} on:click={runUnaryInvoke}>
-                {invokePending ? 'Invoking unary call…' : 'Invoke unary call'}
+                {invokePending ? $i18n.t('request.invokePending') : $i18n.t('request.invoke')}
               </button>
-            {:else}
+            {:else if selectedMethod.rpcType === 'server_stream'}
               <button
                 class="action-button"
                 disabled={streamPending || reflectionPending || protoPending || (streamStartResult !== null && !isTerminalState(streamState))}
                 on:click={runServerStreamInvoke}
               >
-                {streamPending ? 'Starting stream…' : 'Start server stream'}
+                {streamPending ? $i18n.t('request.startStreamPending') : $i18n.t('request.startStream')}
               </button>
               <button
                 class="ghost-button"
                 disabled={cancelPending || !streamStartResult || isTerminalState(streamState)}
                 on:click={runStreamCancel}
               >
-                {cancelPending ? 'Cancelling…' : 'Cancel stream'}
+                {cancelPending ? $i18n.t('request.cancelStreamPending') : $i18n.t('request.cancelStream')}
+              </button>
+            {:else if selectedMethod.rpcType === 'client_stream'}
+              <button
+                class="action-button"
+                disabled={streamPending || reflectionPending || protoPending || (streamStartResult !== null && !isTerminalState(streamState))}
+                on:click={runClientStreamInvoke}
+              >
+                {streamPending ? $i18n.t('request.startClientStreamPending') : $i18n.t('request.startClientStream')}
+              </button>
+              <button
+                class="ghost-button"
+                disabled={cancelPending || !streamStartResult || isTerminalState(streamState)}
+                on:click={runStreamCancel}
+              >
+                {cancelPending ? $i18n.t('request.cancelStreamPending') : $i18n.t('request.cancelStream')}
               </button>
             {/if}
           </div>
-
-          <div class="subtle">Use <strong>Cmd/Ctrl+Enter</strong> inside the editors to run the selected unary or server-streaming method.</div>
         </div>
       {/if}
     </div>
 
     <div class="card stack">
       <div class="card__header">
-        <h3>Response panel</h3>
+        <h3>{$i18n.t('response.panelTitle')}</h3>
         {#if invokeResult}
           <span class:badge--warning={invokeResult.status.code !== 'OK'} class="badge">{invokeResult.status.code}</span>
         {/if}
@@ -1270,7 +1413,7 @@
 
       {#if streamStartResult}
         <div class="pill-row">
-          <span class="pill" class:pill--accent={streamState === 'open'}>{streamState}</span>
+          <span class="pill" class:pill--accent={streamState === 'open'}>{translateStreamStateLabel($i18n.language, streamState)}</span>
           <span class="pill">{streamStartResult.callId}</span>
           {#if streamCompleted}
             <span class:badge--warning={streamCompleted.status.code !== 'OK'} class="badge">{streamCompleted.status.code}</span>
@@ -1283,13 +1426,13 @@
               <strong>{streamError.error.code}</strong>
               <span class="diagnostic-item__meta">{streamError.error.category}</span>
             </div>
-            <div>{streamError.error.message}</div>
+            <div>{translateDiagnosticMessage($i18n.language, streamError.error.code, streamError.error.message)}</div>
           </article>
         {/if}
 
         <div class="stream-timeline">
           {#if streamEvents.length === 0}
-            <div class="empty-state">Live stream events will append here as headers, messages and trailers arrive.</div>
+            <div class="empty-state">{$i18n.t('stream.emptyTimeline')}</div>
           {:else}
             {#each streamEvents as event}
               <article class="history-event">
@@ -1304,41 +1447,41 @@
           {/if}
         </div>
       {:else if !invokeResult}
-        <div class="empty-state">Headers, status, trailers, unary body and streaming timeline events appear here after invocation starts.</div>
+        <div class="empty-state">{$i18n.t('response.empty')}</div>
       {:else}
         <div class="pill-row">
-          <span class="pill pill--accent">{invokeResult.finalState}</span>
+          <span class="pill pill--accent">{translateStreamStateLabel($i18n.language, invokeResult.finalState)}</span>
           <span class="pill">{formatDuration(invokeResult.durationMs)}</span>
           <span class="pill">{invokeResult.callId}</span>
         </div>
 
         <div class="table-like">
           <div class="table-row">
-            <strong>Started</strong>
+            <strong>{$i18n.t('response.started')}</strong>
             <span>{formatTimestamp(invokeResult.startedAt)}</span>
           </div>
           <div class="table-row">
-            <strong>Finished</strong>
+            <strong>{$i18n.t('response.finished')}</strong>
             <span>{formatTimestamp(invokeResult.finishedAt)}</span>
           </div>
           <div class="table-row">
-            <strong>Status</strong>
+            <strong>{$i18n.t('response.status')}</strong>
             <span>{invokeResult.status.code}{invokeResult.status.message ? ` — ${invokeResult.status.message}` : ''}</span>
           </div>
         </div>
 
         <div class="stack">
-          <h4>Response body</h4>
+          <h4>{$i18n.t('response.body')}</h4>
           <pre class="code-block">{formatJsonValue(invokeResult.responseBody)}</pre>
         </div>
 
         <div class="stack">
-          <h4>Headers</h4>
+          <h4>{$i18n.t('response.headers')}</h4>
           <pre class="code-block">{formatJsonValue(invokeResult.headers as unknown as JsonValue)}</pre>
         </div>
 
         <div class="stack">
-          <h4>Trailers</h4>
+          <h4>{$i18n.t('response.trailers')}</h4>
           <pre class="code-block">{formatJsonValue(invokeResult.trailers as unknown as JsonValue)}</pre>
         </div>
 
@@ -1348,7 +1491,7 @@
               <strong>{invokeResult.diagnostic.code}</strong>
               <span class="diagnostic-item__meta">{invokeResult.diagnostic.category}</span>
             </div>
-            <div>{invokeResult.diagnostic.message}</div>
+            <div>{translateDiagnosticMessage($i18n.language, invokeResult.diagnostic.code, invokeResult.diagnostic.message)}</div>
           </article>
         {/if}
       {/if}
@@ -1358,36 +1501,36 @@
   {#if historyDetail || historyDetailPending}
     <div class="card stack">
       <div class="card__header">
-        <h3>Persisted history detail</h3>
+        <h3>{$i18n.t('history.detailTitle')}</h3>
         {#if historyDetail}
           <span class="pill">{historyDetail.summary.callId}</span>
         {/if}
       </div>
 
       {#if historyDetailPending}
-        <div class="empty-state">Loading persisted session artifact…</div>
+        <div class="empty-state">{$i18n.t('history.loading')}</div>
       {:else if historyDetail}
         <div class="grid-cards">
           <article class="card list-block">
-            <h4>Stored summary</h4>
+            <h4>{$i18n.t('history.storedSummary')}</h4>
             <div class="table-like">
               <div class="table-row">
-                <strong>Method</strong>
+                <strong>{$i18n.t('method.method')}</strong>
                 <span>{historyDetail.summary.method}</span>
               </div>
               <div class="table-row">
-                <strong>Status</strong>
+                <strong>{$i18n.t('response.status')}</strong>
                 <span>{historyDetail.status.code}</span>
               </div>
               <div class="table-row">
-                <strong>Artifacts</strong>
+                <strong>{$i18n.t('history.artifacts')}</strong>
                 <span>{historyDetail.summary.sessionLogPath}</span>
               </div>
             </div>
           </article>
 
           <article class="card list-block">
-            <h4>Structured log events</h4>
+            <h4>{$i18n.t('history.structuredLogEvents')}</h4>
             <div class="history-events">
               {#each historyDetail.events as event}
                 <div class="history-event">
