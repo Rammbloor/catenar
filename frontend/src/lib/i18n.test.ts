@@ -4,6 +4,7 @@ import {
   LANGUAGE_STORAGE_KEY,
   detectDefaultLanguage,
   resolveInitialLanguage,
+  translate,
   translateBootstrapSliceSummary,
   translateDiagnosticMessage,
   translateProductLine,
@@ -48,6 +49,26 @@ describe('i18n language resolution', () => {
     storage.setItem(LANGUAGE_STORAGE_KEY, 'de')
 
     expect(resolveInitialLanguage({ storage, locale: 'ru-RU' })).toBe('ru')
+  })
+
+  it('localizes interactive client-stream controls', () => {
+    expect(translate('en', 'request.clientStreamModeInteractive')).toBe('Interactive')
+    expect(translate('ru', 'stream.halfCloseRequested', { callId: 'call_123' })).toContain('call_123')
+  })
+
+  it('localizes bidirectional streaming controls', () => {
+    expect(translate('en', 'request.startBidiStream')).toBe('Start bidi stream')
+    expect(translate('ru', 'request.bidiMessageJson')).toBe('JSON сообщения bidi')
+    expect(translate('en', 'stream.halfClosedLocalReceiving')).toContain('incoming responses')
+    expect(
+      translateDiagnosticMessage('ru', 'application.stream_send_unavailable', 'raw backend copy'),
+    ).toBe('Поток больше не открыт для отправки.')
+  })
+
+  it('localizes windowed timeline and active-stream guard copy', () => {
+    expect(translate('en', 'timeline.windowCount', { count: 200, total: 1000 })).toBe('200/1000 rendered')
+    expect(translate('ru', 'stream.contextLocked', { callId: 'call_123' })).toContain('call_123')
+    expect(translate('ru', 'timeline.jumpToLive')).toBe('К live-хвосту')
   })
 })
 

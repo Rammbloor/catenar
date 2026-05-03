@@ -473,6 +473,11 @@ button {
   overflow-wrap: anywhere;
 }
 
+.empty-state--warning {
+  border-color: rgba(255, 190, 106, 0.32);
+  color: var(--warning);
+}
+
 .reflection-layout {
   align-items: start;
 }
@@ -505,6 +510,14 @@ button {
   background: rgba(10, 13, 16, 0.88);
   color: var(--text);
   padding: 0.7rem 0.78rem;
+}
+
+.field input:disabled,
+.field select:disabled,
+.field textarea:disabled,
+.catalog-method:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
 }
 
 .field textarea {
@@ -574,6 +587,31 @@ button {
   gap: 9px;
 }
 
+.timeline-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.timeline-filter select {
+  min-height: 42px;
+}
+
+.timeline-actions {
+  justify-content: flex-end;
+}
+
+.stream-timeline--windowed {
+  display: block;
+  height: 520px;
+  max-height: 56vh;
+  min-height: 320px;
+  overflow: auto;
+  padding-right: 4px;
+  scroll-behavior: smooth;
+}
+
 .history-row,
 .history-event {
   display: grid;
@@ -584,6 +622,16 @@ button {
   background: rgba(9, 12, 15, 0.72);
   color: var(--text);
   text-align: left;
+}
+
+.history-event--timeline {
+  min-height: 160px;
+  margin-bottom: 9px;
+  box-sizing: border-box;
+}
+
+.code-block--timeline {
+  max-height: 84px;
 }
 
 .selected-row {

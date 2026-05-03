@@ -199,6 +199,34 @@ type CallStartStreamResponse struct {
 	Error *ErrorEnvelope         `json:"error,omitempty"`
 }
 
+type CallSendMessageResult struct {
+	CallID       string      `json:"callId"`
+	SessionID    string      `json:"sessionId"`
+	State        StreamState `json:"state"`
+	MessageIndex int         `json:"messageIndex"`
+	Sequence     int64       `json:"seq"`
+	SentAt       string      `json:"sentAt"`
+}
+
+type CallSendMessageResponse struct {
+	Ok    bool                   `json:"ok"`
+	Data  *CallSendMessageResult `json:"data,omitempty"`
+	Error *ErrorEnvelope         `json:"error,omitempty"`
+}
+
+type CallHalfCloseResult struct {
+	CallID      string      `json:"callId"`
+	SessionID   string      `json:"sessionId"`
+	State       StreamState `json:"state"`
+	RequestedAt string      `json:"requestedAt"`
+}
+
+type CallHalfCloseResponse struct {
+	Ok    bool                 `json:"ok"`
+	Data  *CallHalfCloseResult `json:"data,omitempty"`
+	Error *ErrorEnvelope       `json:"error,omitempty"`
+}
+
 type CallCancelResult struct {
 	CallID      string      `json:"callId"`
 	SessionID   string      `json:"sessionId"`

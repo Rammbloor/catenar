@@ -169,6 +169,44 @@ func (a *App) CallStartStream(input contracts.CallStartStreamInput) contracts.Ca
 	return a.endpoint.CallStartStream(a.ctx, input)
 }
 
+// CallSendMessage sends one manual request message to an active interactive client stream.
+func (a *App) CallSendMessage(input contracts.CallSendMessageInput) contracts.CallSendMessageResponse {
+	if a.ctx == nil {
+		return contracts.CallSendMessageResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.runtime_not_ready",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The Wails runtime context is not ready yet.",
+				Details: map[string]string{
+					"expectedHook": "startup",
+				},
+			},
+		}
+	}
+
+	return a.endpoint.CallSendMessage(a.ctx, input)
+}
+
+// CallHalfClose closes the local send side for an active interactive client stream.
+func (a *App) CallHalfClose(input contracts.CallHalfCloseInput) contracts.CallHalfCloseResponse {
+	if a.ctx == nil {
+		return contracts.CallHalfCloseResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.runtime_not_ready",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The Wails runtime context is not ready yet.",
+				Details: map[string]string{
+					"expectedHook": "startup",
+				},
+			},
+		}
+	}
+
+	return a.endpoint.CallHalfClose(a.ctx, input)
+}
+
 // CallCancel requests cancellation for the active live stream session.
 func (a *App) CallCancel(input contracts.CallCancelInput) contracts.CallCancelResponse {
 	if a.ctx == nil {

@@ -61,12 +61,13 @@ func TestCatalogLoadFromReflectionPlaintextSuccess(t *testing.T) {
 		t.Fatalf("unexpected service catalog: %+v", serviceCatalog)
 	}
 
-	if len(serviceCatalog.Methods) != 3 {
-		t.Fatalf("expected three reflected methods, got %+v", serviceCatalog.Methods)
+	if len(serviceCatalog.Methods) != 4 {
+		t.Fatalf("expected four reflected methods, got %+v", serviceCatalog.Methods)
 	}
 
-	if serviceCatalog.Methods[0].RPCType != contracts.RPCTypeUnary {
-		t.Fatalf("expected unary method metadata, got %+v", serviceCatalog.Methods[0])
+	pingMethod := findCatalogMethod(t, response.Data.Services, "tether.demo.v1.ReflectionDemo.Ping")
+	if pingMethod.RPCType != contracts.RPCTypeUnary {
+		t.Fatalf("expected unary method metadata, got %+v", pingMethod)
 	}
 
 	watchMethod := findCatalogMethod(t, response.Data.Services, "tether.demo.v1.ReflectionDemo.Watch")
@@ -77,6 +78,11 @@ func TestCatalogLoadFromReflectionPlaintextSuccess(t *testing.T) {
 	uploadMethod := findCatalogMethod(t, response.Data.Services, "tether.demo.v1.ReflectionDemo.Upload")
 	if uploadMethod.RPCType != contracts.RPCTypeClientStream {
 		t.Fatalf("expected client-stream metadata, got %+v", uploadMethod)
+	}
+
+	chatMethod := findCatalogMethod(t, response.Data.Services, "tether.demo.v1.ReflectionDemo.Chat")
+	if chatMethod.RPCType != contracts.RPCTypeBidiStream {
+		t.Fatalf("expected bidi-stream metadata, got %+v", chatMethod)
 	}
 
 	assertWellKnownTypes(t, response.Data.WellKnownTypes, []string{
@@ -211,15 +217,19 @@ func TestCatalogLoadFromReflectionCustomCASuccess(t *testing.T) {
 }
 
 type reflectionCatalogServerOptions struct {
-	disableReflection     bool
-	serverTLS             *tls.Config
-	watchMessages         []int64
-	watchBlockUntilCancel bool
-	watchSendDelay        time.Duration
-	watchStatusCode       codes.Code
-	watchStatusMessage    string
-	uploadStatusCode      codes.Code
-	uploadStatusMessage   string
+	disableReflection             bool
+	serverTLS                     *tls.Config
+	watchMessages                 []int64
+	watchBlockUntilCancel         bool
+	watchSendDelay                time.Duration
+	watchStatusCode               codes.Code
+	watchStatusMessage            string
+	uploadStatusCode              codes.Code
+	uploadStatusMessage           string
+	chatStatusCode                codes.Code
+	chatStatusMessage             string
+	chatFailAfterResponses        int
+	chatBlockAfterClientHalfClose bool
 }
 
 type reflectionDemoMarker interface {
@@ -227,13 +237,17 @@ type reflectionDemoMarker interface {
 }
 
 type reflectionDemoService struct {
-	watchMessages         []int64
-	watchBlockUntilCancel bool
-	watchSendDelay        time.Duration
-	watchStatusCode       codes.Code
-	watchStatusMessage    string
-	uploadStatusCode      codes.Code
-	uploadStatusMessage   string
+	watchMessages                 []int64
+	watchBlockUntilCancel         bool
+	watchSendDelay                time.Duration
+	watchStatusCode               codes.Code
+	watchStatusMessage            string
+	uploadStatusCode              codes.Code
+	uploadStatusMessage           string
+	chatStatusCode                codes.Code
+	chatStatusMessage             string
+	chatFailAfterResponses        int
+	chatBlockAfterClientHalfClose bool
 }
 
 func (reflectionDemoService) isReflectionDemo() {}
@@ -376,6 +390,65 @@ var reflectionDemoServiceDesc = grpc.ServiceDesc{
 				return stream.SendMsg(response)
 			},
 		},
+		{
+			StreamName:    "Chat",
+			ClientStreams: true,
+			ServerStreams: true,
+			Handler: func(service any, stream grpc.ServerStream) error {
+				demoService, _ := service.(reflectionDemoService)
+				if err := grpc.SetHeader(stream.Context(), metadata.Pairs(
+					"x-reflection-demo", "chat",
+				)); err != nil {
+					return err
+				}
+				if err := grpc.SetTrailer(stream.Context(), metadata.Pairs(
+					"x-reflection-demo-trailer", "chat-ok",
+				)); err != nil {
+					return err
+				}
+
+				var count int
+				for {
+					request := &timestamppb.Timestamp{}
+					err := stream.RecvMsg(request)
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					if err != nil {
+						return err
+					}
+
+					count++
+					response, err := structpb.NewStruct(map[string]any{
+						"index":       float64(count),
+						"echoSeconds": float64(request.Seconds),
+					})
+					if err != nil {
+						return err
+					}
+					if err := stream.SendMsg(response); err != nil {
+						return err
+					}
+
+					if demoService.chatStatusCode != codes.OK &&
+						demoService.chatFailAfterResponses > 0 &&
+						count >= demoService.chatFailAfterResponses {
+						return status.Error(demoService.chatStatusCode, demoService.chatStatusMessage)
+					}
+				}
+
+				if demoService.chatBlockAfterClientHalfClose {
+					<-stream.Context().Done()
+					return stream.Context().Err()
+				}
+
+				if demoService.chatStatusCode != codes.OK {
+					return status.Error(demoService.chatStatusCode, demoService.chatStatusMessage)
+				}
+
+				return nil
+			},
+		},
 	},
 }
 
@@ -394,13 +467,17 @@ func startReflectionCatalogServer(t *testing.T, options reflectionCatalogServerO
 
 	server := grpc.NewServer(serverOptions...)
 	server.RegisterService(&reflectionDemoServiceDesc, reflectionDemoService{
-		watchMessages:         append([]int64(nil), options.watchMessages...),
-		watchBlockUntilCancel: options.watchBlockUntilCancel,
-		watchSendDelay:        options.watchSendDelay,
-		watchStatusCode:       options.watchStatusCode,
-		watchStatusMessage:    options.watchStatusMessage,
-		uploadStatusCode:      options.uploadStatusCode,
-		uploadStatusMessage:   options.uploadStatusMessage,
+		watchMessages:                 append([]int64(nil), options.watchMessages...),
+		watchBlockUntilCancel:         options.watchBlockUntilCancel,
+		watchSendDelay:                options.watchSendDelay,
+		watchStatusCode:               options.watchStatusCode,
+		watchStatusMessage:            options.watchStatusMessage,
+		uploadStatusCode:              options.uploadStatusCode,
+		uploadStatusMessage:           options.uploadStatusMessage,
+		chatStatusCode:                options.chatStatusCode,
+		chatStatusMessage:             options.chatStatusMessage,
+		chatFailAfterResponses:        options.chatFailAfterResponses,
+		chatBlockAfterClientHalfClose: options.chatBlockAfterClientHalfClose,
 	})
 
 	if !options.disableReflection {
@@ -455,6 +532,13 @@ func buildReflectionCatalogResolver(t *testing.T) protodesc.Resolver {
 						InputType:       proto.String(".google.protobuf.Timestamp"),
 						OutputType:      proto.String(".google.protobuf.Struct"),
 						ClientStreaming: proto.Bool(true),
+					},
+					{
+						Name:            proto.String("Chat"),
+						InputType:       proto.String(".google.protobuf.Timestamp"),
+						OutputType:      proto.String(".google.protobuf.Struct"),
+						ClientStreaming: proto.Bool(true),
+						ServerStreaming: proto.Bool(true),
 					},
 				},
 			},

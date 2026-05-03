@@ -458,8 +458,9 @@ func (m *Manager) PrepareEndpointTest(_ context.Context, input contracts.Endpoin
 
 	m.active.manifest.Endpoints = upsertEndpointFile(m.active.manifest.Endpoints, endpointToFile(normalized))
 	return endpoint.WorkspaceContext{
-		ID:   m.active.id,
-		Kind: "file-workspace",
+		ID:             m.active.id,
+		Kind:           "file-workspace",
+		EventRetention: eventRetentionFromSettings(m.active.manifest.Settings),
 	}, normalized, nil
 }
 
@@ -524,6 +525,17 @@ func (a *activeWorkspace) snapshot() contracts.WorkspaceSnapshot {
 		ImportPaths:   append([]string(nil), a.manifest.ImportPaths...),
 		SavedRequests: savedRequestSummaries(a.savedRequests),
 		BackupPaths:   append([]string(nil), a.backupPaths...),
+	}
+}
+
+func eventRetentionFromSettings(settings *settingsFile) endpoint.EventRetentionPolicy {
+	if settings == nil || settings.EventRetention == nil {
+		return endpoint.EventRetentionPolicy{}
+	}
+
+	return endpoint.EventRetentionPolicy{
+		MaxEventsPerCall: settings.EventRetention.MaxEventsPerCall,
+		MaxBytesPerCall:  int64(settings.EventRetention.MaxBytesPerCall),
 	}
 }
 

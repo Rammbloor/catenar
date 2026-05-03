@@ -25,8 +25,9 @@ type EventEmitter interface {
 }
 
 type WorkspaceContext struct {
-	ID   string
-	Kind string
+	ID             string
+	Kind           string
+	EventRetention EventRetentionPolicy
 }
 
 type WorkspaceManager interface {
@@ -94,6 +95,10 @@ type GRPCRuntime interface {
 	InvokeUnary(ctx context.Context, conn GRPCClientConn, request UnaryInvokeRequest) (UnaryInvokeResult, *endpointDiagnostic)
 	StartServerStream(ctx context.Context, conn GRPCClientConn, request ServerStreamStartRequest) (ServerStreamStartResult, *endpointDiagnostic)
 	ConsumeServerStream(request ServerStreamConsumeRequest) (ServerStreamConsumeResult, *endpointDiagnostic)
+	StartClientStream(ctx context.Context, conn GRPCClientConn, request ClientStreamStartRequest) (ClientStreamStartResult, *endpointDiagnostic)
+	SendClientStreamMessage(request ClientStreamSendRequest) (ClientStreamSentMessage, *endpointDiagnostic)
+	CloseClientStreamSend(method contracts.CatalogMethod, stream ClientStreamStartResult) *endpointDiagnostic
+	ReceiveClientStreamResponse(request ClientStreamReceiveRequest) (ClientStreamInvokeResult, *endpointDiagnostic)
 	InvokeClientStream(ctx context.Context, conn GRPCClientConn, request ClientStreamInvokeRequest) (ClientStreamInvokeResult, *endpointDiagnostic)
 }
 
@@ -131,6 +136,7 @@ type ServiceDependencies struct {
 	ProtoLoader      ProtoLoader
 	HistoryStore     HistoryStore
 	EventLog         EventLog
+	EventRetention   EventRetentionPolicy
 	Now              func() time.Time
 }
 
@@ -143,6 +149,7 @@ type Service struct {
 	protoLoader       ProtoLoader
 	historyStore      HistoryStore
 	eventLog          EventLog
+	eventRetention    EventRetentionPolicy
 	emitter           EventEmitter
 	catalogCacheMu    sync.RWMutex
 	catalogCache      map[string]cachedMethodCatalog
@@ -218,6 +225,7 @@ func NewService(deps ServiceDependencies) *Service {
 		protoLoader:       protoLoader,
 		historyStore:      historyStore,
 		eventLog:          eventLog,
+		eventRetention:    normalizeEventRetentionPolicy(deps.EventRetention),
 		catalogCache:      make(map[string]cachedMethodCatalog),
 		streamSessions:    make(map[string]*activeStreamSession),
 		initializationErr: initializationErr,

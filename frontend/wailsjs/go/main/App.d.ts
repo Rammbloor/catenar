@@ -5,7 +5,11 @@ import {appshell} from '../models';
 
 export function CallCancel(arg1:contracts.CallCancelInput):Promise<contracts.CallCancelResponse>;
 
+export function CallHalfClose(arg1:contracts.CallHalfCloseInput):Promise<contracts.CallHalfCloseResponse>;
+
 export function CallInvokeUnary(arg1:contracts.CallInvokeUnaryInput):Promise<contracts.CallInvokeUnaryResponse>;
+
+export function CallSendMessage(arg1:contracts.CallSendMessageInput):Promise<contracts.CallSendMessageResponse>;
 
 export function CallStartStream(arg1:contracts.CallStartStreamInput):Promise<contracts.CallStartStreamResponse>;
 

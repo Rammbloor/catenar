@@ -6,8 +6,16 @@ export function CallCancel(arg1) {
   return window['go']['main']['App']['CallCancel'](arg1);
 }
 
+export function CallHalfClose(arg1) {
+  return window['go']['main']['App']['CallHalfClose'](arg1);
+}
+
 export function CallInvokeUnary(arg1) {
   return window['go']['main']['App']['CallInvokeUnary'](arg1);
+}
+
+export function CallSendMessage(arg1) {
+  return window['go']['main']['App']['CallSendMessage'](arg1);
 }
 
 export function CallStartStream(arg1) {

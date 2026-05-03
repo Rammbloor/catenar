@@ -129,6 +129,52 @@ func TestRequestSavePersistsSavedRequestAndReopensSummary(t *testing.T) {
 	}
 }
 
+func TestPrepareEndpointTestCarriesWorkspaceEventRetentionSettings(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), "settings-workspace")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("create workspace root: %v", err)
+	}
+	writeWorkspaceYAML(t, filepath.Join(root, manifestFileName), map[string]any{
+		"version": CurrentManifestVersion,
+		"name":    "settings",
+		"endpoints": []map[string]any{
+			{
+				"id":               "ep_local",
+				"name":             "local",
+				"target":           "127.0.0.1:50051",
+				"connectTimeoutMs": 3000,
+				"tls": map[string]any{
+					"mode": "plaintext",
+				},
+			},
+		},
+		"settings": map[string]any{
+			"eventRetention": map[string]any{
+				"maxEventsPerCall": 7,
+				"maxBytesPerCall":  512,
+			},
+		},
+	})
+
+	manager := NewManager(ManagerOptions{Now: fixedWorkspaceTestTime})
+	openResponse := manager.Open(context.Background(), root)
+	if !openResponse.Ok {
+		t.Fatalf("expected workspace open to succeed, got %+v", openResponse.Error)
+	}
+
+	scope, _, err := manager.PrepareEndpointTest(context.Background(), contracts.EndpointTestInput{
+		Endpoint: workspaceTestEndpoint("ep_local"),
+	})
+	if err != nil {
+		t.Fatalf("prepare endpoint: %v", err)
+	}
+	if scope.EventRetention.MaxEventsPerCall != 7 || scope.EventRetention.MaxBytesPerCall != 512 {
+		t.Fatalf("expected workspace retention settings in runtime scope, got %+v", scope.EventRetention)
+	}
+}
+
 func TestOpenMigratesVersionZeroManifestAndCreatesBackup(t *testing.T) {
 	t.Parallel()
 

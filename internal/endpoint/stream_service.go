@@ -13,12 +13,57 @@ import (
 	"tether/internal/contracts"
 )
 
+const (
+	DefaultMaxEventsPerCall = 10000
+	DefaultMaxBytesPerCall  = 33554432
+)
+
+type EventRetentionPolicy struct {
+	MaxEventsPerCall int
+	MaxBytesPerCall  int64
+}
+
+type streamRetentionSnapshot struct {
+	rpcType          contracts.RPCType
+	truncated        bool
+	reason           string
+	maxEventsPerCall int
+	maxBytesPerCall  int64
+	retainedEvents   int
+	retainedBytes    int64
+	totalEvents      int64
+	droppedEvents    int64
+}
+
+type recordedStreamEvent struct {
+	event     contracts.HistoryLogEvent
+	retained  bool
+	retention streamRetentionSnapshot
+}
+
 type activeStreamSession struct {
-	mu        sync.Mutex
-	callID    string
-	sessionID string
-	cancel    context.CancelFunc
-	state     contracts.StreamState
+	mu         sync.Mutex
+	callID     string
+	sessionID  string
+	cancel     context.CancelFunc
+	state      contracts.StreamState
+	conditions []contracts.SessionCondition
+	client     *interactiveClientStreamSession
+}
+
+type interactiveClientStreamSession struct {
+	mu               sync.Mutex
+	conn             GRPCClientConn
+	stream           ClientStreamStartResult
+	cancel           context.CancelFunc
+	startedAt        time.Time
+	scope            WorkspaceContext
+	endpoint         contracts.EndpointPreset
+	method           contracts.CatalogMethod
+	methodDesc       protoreflect.MethodDescriptor
+	recorder         *streamHistoryRecorder
+	halfCloseStarted bool
+	completed        bool
 }
 
 type streamHistoryRecorder struct {
@@ -26,7 +71,15 @@ type streamHistoryRecorder struct {
 	sessionID      string
 	method         string
 	rpcType        contracts.RPCType
+	retention      EventRetentionPolicy
 	nextSequence   int64
+	retainedBytes  int64
+	totalEvents    int64
+	droppedEvents  int64
+	truncated      bool
+	truncatedCause string
+	requestTotal   int
+	responseTotal  int
 	requestBodies  []any
 	events         []contracts.HistoryLogEvent
 	responseBodies []any
@@ -44,13 +97,15 @@ func (s *Service) CallStartStream(ctx context.Context, input contracts.CallStart
 		}
 	}
 
-	if input.RPCType != contracts.RPCTypeServerStream && input.RPCType != contracts.RPCTypeClientStream {
+	if input.RPCType != contracts.RPCTypeServerStream &&
+		input.RPCType != contracts.RPCTypeClientStream &&
+		input.RPCType != contracts.RPCTypeBidiStream {
 		return contracts.CallStartStreamResponse{
 			Ok: false,
 			Error: &contracts.ErrorEnvelope{
 				Code:     "validation.method_rpc_type_invalid",
 				Category: contracts.ErrorCategoryValidation,
-				Message:  "Slice 3.2 can start server-streaming and client-streaming static sequence methods only.",
+				Message:  "Slice 3.4 can start server-streaming, client-streaming and bidirectional streaming methods.",
 				Details: map[string]string{
 					"rpcType": string(input.RPCType),
 				},
@@ -136,6 +191,9 @@ func (s *Service) CallStartStream(ctx context.Context, input contracts.CallStart
 	if selectedMethod.RPCType == contracts.RPCTypeClientStream {
 		return s.callStartClientStream(ctx, cachedCatalog, selectedMethod, methodDescriptor, input)
 	}
+	if selectedMethod.RPCType == contracts.RPCTypeBidiStream {
+		return s.callStartBidiStreamInteractive(ctx, cachedCatalog, selectedMethod, methodDescriptor, input)
+	}
 
 	requestBody, requestBodyErr := serverStreamRequestBody(methodDescriptor, input)
 	if requestBodyErr != nil {
@@ -201,11 +259,9 @@ func (s *Service) CallStartStream(ctx context.Context, input contracts.CallStart
 	session.cancel = streamStart.Cancel
 	session.mu.Unlock()
 
-	recorder := newStreamHistoryRecorder(callID, sessionID, selectedMethod.FullName, contracts.RPCTypeServerStream)
-	recorder.recordCallStarted(cachedCatalog.scope.ID, cachedCatalog.endpoint.ID, requestBody, mergedMetadata, startedAt)
-	s.emitHistoryBackedStreamEvent(recorder.events[0])
-	recorder.recordMessageSent(requestBody, startedAt)
-	s.emitHistoryBackedStreamEvent(recorder.events[1])
+	recorder := s.newStreamHistoryRecorder(cachedCatalog.scope, callID, sessionID, selectedMethod.FullName, contracts.RPCTypeServerStream)
+	s.emitRecordedStreamEvent(session, recorder.recordCallStarted(cachedCatalog.scope.ID, cachedCatalog.endpoint.ID, requestBody, mergedMetadata, startedAt))
+	s.emitRecordedStreamEvent(session, recorder.recordMessageSent(requestBody, startedAt))
 
 	s.emitStreamState(session, contracts.StreamStateConnecting, "", startedAt)
 	s.emitStreamState(session, contracts.StreamStateOpen, contracts.StreamStateConnecting, s.now().UTC())
@@ -254,15 +310,233 @@ func (s *Service) CallCancel(ctx context.Context, input contracts.CallCancelInpu
 	session.mu.Lock()
 	cancel := session.cancel
 	state := session.state
+	client := session.client
 	session.mu.Unlock()
+	resultState := contracts.StreamStateCancelled
+	if state == contracts.StreamStateClosed ||
+		state == contracts.StreamStateCancelled ||
+		state == contracts.StreamStateError {
+		resultState = state
+	}
 	cancel()
+	if client != nil {
+		client.mu.Lock()
+		halfCloseStarted := client.halfCloseStarted
+		completed := client.completed
+		client.mu.Unlock()
+		if !halfCloseStarted && !completed {
+			cancelDiagnostic := classifyClientStreamError(client.method, context.Canceled)
+			s.completeClientStreamInteractiveSession(ctx, session, client, ClientStreamInvokeResult{
+				Status:     statusFromDiagnostic(cancelDiagnostic),
+				FinishedAt: requestedAt,
+			}, cancelDiagnostic, state)
+		}
+	}
 
 	return contracts.CallCancelResponse{
 		Ok: true,
 		Data: &contracts.CallCancelResult{
 			CallID:      session.callID,
 			SessionID:   session.sessionID,
-			State:       state,
+			State:       resultState,
+			RequestedAt: requestedAt.Format(time.RFC3339Nano),
+		},
+	}
+}
+
+func (s *Service) CallSendMessage(ctx context.Context, input contracts.CallSendMessageInput) contracts.CallSendMessageResponse {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	session, errEnvelope := s.activeStreamSession(input.SessionID)
+	if errEnvelope != nil {
+		return contracts.CallSendMessageResponse{
+			Ok:    false,
+			Error: errEnvelope,
+		}
+	}
+
+	session.mu.Lock()
+	client := session.client
+	state := session.state
+	session.mu.Unlock()
+	if client == nil {
+		return contracts.CallSendMessageResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.stream_session_not_interactive",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The active stream session does not accept manual client messages.",
+				Details: map[string]string{
+					"sessionId": session.sessionID,
+				},
+			},
+		}
+	}
+	if state != contracts.StreamStateOpen {
+		return contracts.CallSendMessageResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.stream_send_unavailable",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "Client-streaming messages can only be sent while the stream is open.",
+				Details: map[string]string{
+					"sessionId": session.sessionID,
+					"state":     string(state),
+				},
+			},
+		}
+	}
+
+	client.mu.Lock()
+	if client.halfCloseStarted || client.completed {
+		client.mu.Unlock()
+		return contracts.CallSendMessageResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.stream_send_unavailable",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The client send side is already closed for this stream.",
+				Details: map[string]string{
+					"sessionId": session.sessionID,
+				},
+			},
+		}
+	}
+
+	messageIndex := client.recorder.requestCount()
+	sent, sendDiagnostic := s.grpcRuntime.SendClientStreamMessage(ClientStreamSendRequest{
+		Method:     client.method,
+		Descriptor: client.methodDesc,
+		Stream:     client.stream,
+		Body:       input.Message.Body,
+		Index:      messageIndex,
+	})
+	if sendDiagnostic != nil {
+		client.mu.Unlock()
+		if sendDiagnostic.Category == contracts.ErrorCategoryValidation {
+			s.emitDiagnostic("client-stream", s.now().UTC(), sendDiagnostic)
+		} else {
+			s.completeClientStreamInteractiveSession(ctx, session, client, ClientStreamInvokeResult{
+				Status:     statusFromDiagnostic(sendDiagnostic),
+				FinishedAt: s.now().UTC(),
+			}, sendDiagnostic, state)
+		}
+		return contracts.CallSendMessageResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(sendDiagnostic, "application.stream_send_failed", "The client-streaming message could not be sent."),
+		}
+	}
+
+	event := client.recorder.recordMessageSent(sent.Body, sent.SentAt)
+	client.mu.Unlock()
+	s.emitRecordedStreamEvent(session, event)
+
+	return contracts.CallSendMessageResponse{
+		Ok: true,
+		Data: &contracts.CallSendMessageResult{
+			CallID:       session.callID,
+			SessionID:    session.sessionID,
+			State:        contracts.StreamStateOpen,
+			MessageIndex: event.event.MessageIndex,
+			Sequence:     event.event.Sequence,
+			SentAt:       sent.SentAt.Format(time.RFC3339Nano),
+		},
+	}
+}
+
+func (s *Service) CallHalfClose(ctx context.Context, input contracts.CallHalfCloseInput) contracts.CallHalfCloseResponse {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	requestedAt := s.now().UTC()
+	session, errEnvelope := s.activeStreamSession(input.SessionID)
+	if errEnvelope != nil {
+		return contracts.CallHalfCloseResponse{
+			Ok:    false,
+			Error: errEnvelope,
+		}
+	}
+
+	session.mu.Lock()
+	client := session.client
+	state := session.state
+	session.mu.Unlock()
+	if client == nil {
+		return contracts.CallHalfCloseResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.stream_session_not_interactive",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The active stream session does not expose a manual client send side.",
+				Details: map[string]string{
+					"sessionId": session.sessionID,
+				},
+			},
+		}
+	}
+	if state != contracts.StreamStateOpen {
+		return contracts.CallHalfCloseResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.stream_half_close_unavailable",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The client send side can only be half-closed while the stream is open.",
+				Details: map[string]string{
+					"sessionId": session.sessionID,
+					"state":     string(state),
+				},
+			},
+		}
+	}
+
+	client.mu.Lock()
+	if client.halfCloseStarted || client.completed {
+		client.mu.Unlock()
+		return contracts.CallHalfCloseResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "application.stream_half_close_unavailable",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The client send side is already half-closed.",
+				Details: map[string]string{
+					"sessionId": session.sessionID,
+				},
+			},
+		}
+	}
+
+	closeDiagnostic := s.grpcRuntime.CloseClientStreamSend(client.method, client.stream)
+	if closeDiagnostic != nil {
+		client.mu.Unlock()
+		s.completeClientStreamInteractiveSession(ctx, session, client, ClientStreamInvokeResult{
+			Status:     statusFromDiagnostic(closeDiagnostic),
+			FinishedAt: requestedAt,
+		}, closeDiagnostic, state)
+		return contracts.CallHalfCloseResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(closeDiagnostic, "application.stream_half_close_failed", "The client send side could not be half-closed."),
+		}
+	}
+
+	client.halfCloseStarted = true
+	event := client.recorder.recordLocalHalfClose(requestedAt)
+	client.mu.Unlock()
+
+	s.emitRecordedStreamEvent(session, event)
+	s.emitStreamState(session, contracts.StreamStateHalfClosedLocal, contracts.StreamStateOpen, requestedAt)
+	if client.method.RPCType == contracts.RPCTypeClientStream {
+		go s.runClientStreamInteractiveCompletion(ctx, session, client)
+	}
+
+	return contracts.CallHalfCloseResponse{
+		Ok: true,
+		Data: &contracts.CallHalfCloseResult{
+			CallID:      session.callID,
+			SessionID:   session.sessionID,
+			State:       contracts.StreamStateHalfClosedLocal,
 			RequestedAt: requestedAt.Format(time.RFC3339Nano),
 		},
 	}
@@ -275,6 +549,21 @@ func (s *Service) callStartClientStream(
 	methodDescriptor protoreflect.MethodDescriptor,
 	input contracts.CallStartStreamInput,
 ) contracts.CallStartStreamResponse {
+	if input.RequestSpec == nil {
+		return contracts.CallStartStreamResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "validation.client_stream_static_sequence_required",
+				Category: contracts.ErrorCategoryValidation,
+				Message:  "Client-streaming calls require either static-sequence or interactive request mode.",
+			},
+		}
+	}
+
+	if input.RequestSpec.Mode == contracts.RequestModeInteractive {
+		return s.callStartClientStreamInteractive(ctx, cachedCatalog, selectedMethod, methodDescriptor, input)
+	}
+
 	requestMessages, requestMessagesErr := clientStreamRequestMessages(input)
 	if requestMessagesErr != nil {
 		return contracts.CallStartStreamResponse{
@@ -323,9 +612,9 @@ func (s *Service) callStartClientStream(
 	}
 
 	mergedMetadata := mergeInvokeMetadata(cachedCatalog.endpoint.MetadataDefaults, input.Metadata)
-	recorder := newStreamHistoryRecorder(callID, sessionID, selectedMethod.FullName, contracts.RPCTypeClientStream)
+	recorder := s.newStreamHistoryRecorder(cachedCatalog.scope, callID, sessionID, selectedMethod.FullName, contracts.RPCTypeClientStream)
 	startEvent := recorder.recordCallStarted(cachedCatalog.scope.ID, cachedCatalog.endpoint.ID, streamRequestMessagesBody(requestMessages), mergedMetadata, startedAt)
-	s.emitHistoryBackedStreamEvent(startEvent)
+	s.emitRecordedStreamEvent(session, startEvent)
 
 	s.emitStreamState(session, contracts.StreamStateConnecting, "", startedAt)
 	s.emitStreamState(session, contracts.StreamStateOpen, contracts.StreamStateConnecting, s.now().UTC())
@@ -353,6 +642,216 @@ func (s *Service) callStartClientStream(
 			EndpointID: cachedCatalog.endpoint.ID,
 			Method:     selectedMethod.FullName,
 			RPCType:    contracts.RPCTypeClientStream,
+			State:      contracts.StreamStateOpen,
+			StartedAt:  startedAt.Format(time.RFC3339Nano),
+		},
+	}
+}
+
+func (s *Service) callStartClientStreamInteractive(
+	ctx context.Context,
+	cachedCatalog cachedMethodCatalog,
+	selectedMethod contracts.CatalogMethod,
+	methodDescriptor protoreflect.MethodDescriptor,
+	input contracts.CallStartStreamInput,
+) contracts.CallStartStreamResponse {
+	startedAt := s.now().UTC()
+	callID, sessionID := newCallIdentity(startedAt)
+	callCtx, cancel := context.WithCancel(ctx)
+	session := &activeStreamSession{
+		callID:    callID,
+		sessionID: sessionID,
+		cancel:    cancel,
+		state:     contracts.StreamStateIdle,
+	}
+	if errEnvelope := s.reserveActiveStreamSession(session); errEnvelope != nil {
+		cancel()
+		return contracts.CallStartStreamResponse{
+			Ok:    false,
+			Error: errEnvelope,
+		}
+	}
+
+	runtimeCfg, prepDiagnostic := s.resolveRuntimeConfig(ctx, cachedCatalog.scope, cachedCatalog.endpoint)
+	if prepDiagnostic != nil {
+		cancel()
+		s.removeActiveStreamSession(sessionID)
+		s.emitDiagnostic("client-stream", startedAt, prepDiagnostic)
+		return contracts.CallStartStreamResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(prepDiagnostic, "application.endpoint_preparation_failed", "The endpoint could not be prepared."),
+		}
+	}
+
+	conn, runtimeDiagnostic := s.grpcRuntime.Dial(ctx, runtimeCfg)
+	if runtimeDiagnostic != nil {
+		cancel()
+		s.removeActiveStreamSession(sessionID)
+		s.emitDiagnostic("client-stream", startedAt, runtimeDiagnostic)
+		return contracts.CallStartStreamResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(runtimeDiagnostic, "transport.grpc_not_ready", "The endpoint could not establish a ready gRPC channel."),
+		}
+	}
+
+	mergedMetadata := mergeInvokeMetadata(cachedCatalog.endpoint.MetadataDefaults, input.Metadata)
+	streamStart, startDiagnostic := s.grpcRuntime.StartClientStream(callCtx, conn, ClientStreamStartRequest{
+		Method:     selectedMethod,
+		Descriptor: methodDescriptor,
+		Metadata:   mergedMetadata,
+	})
+	if startDiagnostic != nil {
+		cancel()
+		s.removeActiveStreamSession(sessionID)
+		_ = conn.Close()
+		s.emitDiagnostic("client-stream", startedAt, startDiagnostic)
+		return contracts.CallStartStreamResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(startDiagnostic, "application.stream_start_failed", "The client-streaming call could not be started."),
+		}
+	}
+
+	recorder := s.newStreamHistoryRecorder(cachedCatalog.scope, callID, sessionID, selectedMethod.FullName, contracts.RPCTypeClientStream)
+	startEvent := recorder.recordCallStarted(cachedCatalog.scope.ID, cachedCatalog.endpoint.ID, nil, mergedMetadata, startedAt)
+	s.emitRecordedStreamEvent(session, startEvent)
+
+	session.mu.Lock()
+	session.client = &interactiveClientStreamSession{
+		conn:       conn,
+		stream:     streamStart,
+		cancel:     cancel,
+		startedAt:  startedAt,
+		scope:      cachedCatalog.scope,
+		endpoint:   cachedCatalog.endpoint,
+		method:     selectedMethod,
+		methodDesc: methodDescriptor,
+		recorder:   recorder,
+	}
+	session.mu.Unlock()
+
+	s.emitStreamState(session, contracts.StreamStateConnecting, "", startedAt)
+	s.emitStreamState(session, contracts.StreamStateOpen, contracts.StreamStateConnecting, s.now().UTC())
+
+	return contracts.CallStartStreamResponse{
+		Ok: true,
+		Data: &contracts.CallStartStreamResult{
+			CallID:     callID,
+			SessionID:  sessionID,
+			EndpointID: cachedCatalog.endpoint.ID,
+			Method:     selectedMethod.FullName,
+			RPCType:    contracts.RPCTypeClientStream,
+			State:      contracts.StreamStateOpen,
+			StartedAt:  startedAt.Format(time.RFC3339Nano),
+		},
+	}
+}
+
+func (s *Service) callStartBidiStreamInteractive(
+	ctx context.Context,
+	cachedCatalog cachedMethodCatalog,
+	selectedMethod contracts.CatalogMethod,
+	methodDescriptor protoreflect.MethodDescriptor,
+	input contracts.CallStartStreamInput,
+) contracts.CallStartStreamResponse {
+	if input.RequestSpec == nil || input.RequestSpec.Mode != contracts.RequestModeInteractive {
+		return contracts.CallStartStreamResponse{
+			Ok: false,
+			Error: &contracts.ErrorEnvelope{
+				Code:     "validation.bidi_stream_interactive_required",
+				Category: contracts.ErrorCategoryValidation,
+				Message:  "Bidirectional streaming calls require interactive request mode.",
+			},
+		}
+	}
+
+	startedAt := s.now().UTC()
+	callID, sessionID := newCallIdentity(startedAt)
+	callCtx, cancel := context.WithCancel(ctx)
+	session := &activeStreamSession{
+		callID:    callID,
+		sessionID: sessionID,
+		cancel:    cancel,
+		state:     contracts.StreamStateIdle,
+	}
+	if errEnvelope := s.reserveActiveStreamSession(session); errEnvelope != nil {
+		cancel()
+		return contracts.CallStartStreamResponse{
+			Ok:    false,
+			Error: errEnvelope,
+		}
+	}
+
+	runtimeCfg, prepDiagnostic := s.resolveRuntimeConfig(ctx, cachedCatalog.scope, cachedCatalog.endpoint)
+	if prepDiagnostic != nil {
+		cancel()
+		s.removeActiveStreamSession(sessionID)
+		s.emitDiagnostic("bidi-stream", startedAt, prepDiagnostic)
+		return contracts.CallStartStreamResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(prepDiagnostic, "application.endpoint_preparation_failed", "The endpoint could not be prepared."),
+		}
+	}
+
+	conn, runtimeDiagnostic := s.grpcRuntime.Dial(ctx, runtimeCfg)
+	if runtimeDiagnostic != nil {
+		cancel()
+		s.removeActiveStreamSession(sessionID)
+		s.emitDiagnostic("bidi-stream", startedAt, runtimeDiagnostic)
+		return contracts.CallStartStreamResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(runtimeDiagnostic, "transport.grpc_not_ready", "The endpoint could not establish a ready gRPC channel."),
+		}
+	}
+
+	mergedMetadata := mergeInvokeMetadata(cachedCatalog.endpoint.MetadataDefaults, input.Metadata)
+	streamStart, startDiagnostic := s.grpcRuntime.StartClientStream(callCtx, conn, ClientStreamStartRequest{
+		Method:     selectedMethod,
+		Descriptor: methodDescriptor,
+		Metadata:   mergedMetadata,
+	})
+	if startDiagnostic != nil {
+		cancel()
+		s.removeActiveStreamSession(sessionID)
+		_ = conn.Close()
+		s.emitDiagnostic("bidi-stream", startedAt, startDiagnostic)
+		return contracts.CallStartStreamResponse{
+			Ok:    false,
+			Error: errorEnvelopeFromDiagnostic(startDiagnostic, "application.stream_start_failed", "The bidirectional streaming call could not be started."),
+		}
+	}
+
+	recorder := s.newStreamHistoryRecorder(cachedCatalog.scope, callID, sessionID, selectedMethod.FullName, contracts.RPCTypeBidiStream)
+	startEvent := recorder.recordCallStarted(cachedCatalog.scope.ID, cachedCatalog.endpoint.ID, nil, mergedMetadata, startedAt)
+	s.emitRecordedStreamEvent(session, startEvent)
+
+	client := &interactiveClientStreamSession{
+		conn:       conn,
+		stream:     streamStart,
+		cancel:     cancel,
+		startedAt:  startedAt,
+		scope:      cachedCatalog.scope,
+		endpoint:   cachedCatalog.endpoint,
+		method:     selectedMethod,
+		methodDesc: methodDescriptor,
+		recorder:   recorder,
+	}
+	session.mu.Lock()
+	session.client = client
+	session.mu.Unlock()
+
+	s.emitStreamState(session, contracts.StreamStateConnecting, "", startedAt)
+	s.emitStreamState(session, contracts.StreamStateOpen, contracts.StreamStateConnecting, s.now().UTC())
+
+	go s.runBidiStreamReceiveLoop(ctx, session, client, resolveServerStreamIdleTimeout(cachedCatalog.endpoint, input.CallOptions))
+
+	return contracts.CallStartStreamResponse{
+		Ok: true,
+		Data: &contracts.CallStartStreamResult{
+			CallID:     callID,
+			SessionID:  sessionID,
+			EndpointID: cachedCatalog.endpoint.ID,
+			Method:     selectedMethod.FullName,
+			RPCType:    contracts.RPCTypeBidiStream,
 			State:      contracts.StreamStateOpen,
 			StartedAt:  startedAt.Format(time.RFC3339Nano),
 		},
@@ -402,11 +901,11 @@ func (s *Service) runServerStreamSession(ctx context.Context, input streamSessio
 		IdleTimeout: input.idleTimeout,
 		OnHeaders: func(headers map[string][]string, ts time.Time) {
 			event := input.recorder.recordHeaders(headers, ts)
-			s.emitHistoryBackedStreamEvent(event)
+			s.emitRecordedStreamEvent(input.session, event)
 		},
 		OnMessage: func(message ServerStreamMessage) {
 			event := input.recorder.recordMessageReceived(message)
-			s.emitHistoryBackedStreamEvent(event)
+			s.emitRecordedStreamEvent(input.session, event)
 		},
 	})
 
@@ -430,7 +929,7 @@ func (s *Service) runServerStreamSession(ctx context.Context, input streamSessio
 
 	if len(consumeResult.Trailers) > 0 || status.Code != "" {
 		event := input.recorder.recordTrailers(status, consumeResult.Trailers, finishedAt)
-		s.emitHistoryBackedStreamEvent(event)
+		s.emitRecordedStreamEvent(input.session, event)
 	}
 	finalEvent := input.recorder.recordFinished(finalState, status, consumeDiagnostic, duration, finishedAt)
 
@@ -472,9 +971,9 @@ func (s *Service) runServerStreamSession(ctx context.Context, input streamSessio
 		StartedAt:      input.startedAt.Format(time.RFC3339Nano),
 		FinishedAt:     finishedAt.Format(time.RFC3339Nano),
 		DurationMs:     duration.Milliseconds(),
-		RequestCount:   1,
-		ResponseCount:  len(input.recorder.responses()),
-		Truncated:      false,
+		RequestCount:   input.recorder.requestCount(),
+		ResponseCount:  input.recorder.responseCount(),
+		Truncated:      input.recorder.truncated,
 		ErrorCategory:  invokeDiagnosticCategory(consumeDiagnostic),
 		ErrorCode:      invokeDiagnosticCode(consumeDiagnostic),
 		SummaryPath:    artifacts.SummaryPath,
@@ -492,7 +991,7 @@ func (s *Service) runServerStreamSession(ctx context.Context, input streamSessio
 		}
 	}
 
-	s.emitHistoryBackedStreamEvent(finalEvent)
+	s.emitRecordedStreamEvent(input.session, finalEvent)
 	s.emitStreamState(input.session, finalState, contracts.StreamStateOpen, finishedAt)
 	s.emitStreamCompleted(input.session, finalState, status, finishedAt)
 }
@@ -512,11 +1011,11 @@ func (s *Service) runClientStreamStaticSequence(ctx context.Context, input clien
 		RequestTimeout: resolveUnaryRequestTimeout(input.endpoint, input.callOptions),
 		OnMessageSent: func(message ClientStreamSentMessage) {
 			event := input.recorder.recordMessageSent(message.Body, message.SentAt)
-			s.emitHistoryBackedStreamEvent(event)
+			s.emitRecordedStreamEvent(input.session, event)
 		},
 		OnHalfClose: func(ts time.Time) {
 			event := input.recorder.recordLocalHalfClose(ts)
-			s.emitHistoryBackedStreamEvent(event)
+			s.emitRecordedStreamEvent(input.session, event)
 			s.emitStreamState(input.session, contracts.StreamStateHalfClosedLocal, contracts.StreamStateOpen, ts)
 		},
 	})
@@ -544,7 +1043,7 @@ func (s *Service) runClientStreamStaticSequence(ctx context.Context, input clien
 
 	if len(invokeResult.Headers) > 0 {
 		event := input.recorder.recordHeaders(invokeResult.Headers, finishedAt)
-		s.emitHistoryBackedStreamEvent(event)
+		s.emitRecordedStreamEvent(input.session, event)
 	}
 	if invokeResult.ResponseBody != nil {
 		message := ServerStreamMessage{
@@ -554,11 +1053,11 @@ func (s *Service) runClientStreamStaticSequence(ctx context.Context, input clien
 			ReceivedAt: finishedAt,
 		}
 		event := input.recorder.recordMessageReceived(message)
-		s.emitHistoryBackedStreamEvent(event)
+		s.emitRecordedStreamEvent(input.session, event)
 	}
 	if len(invokeResult.Trailers) > 0 || status.Code != "" {
 		event := input.recorder.recordTrailers(status, invokeResult.Trailers, finishedAt)
-		s.emitHistoryBackedStreamEvent(event)
+		s.emitRecordedStreamEvent(input.session, event)
 	}
 	finalEvent := input.recorder.recordFinished(finalState, status, invokeDiagnostic, duration, finishedAt)
 
@@ -601,8 +1100,8 @@ func (s *Service) runClientStreamStaticSequence(ctx context.Context, input clien
 		FinishedAt:     finishedAt.Format(time.RFC3339Nano),
 		DurationMs:     duration.Milliseconds(),
 		RequestCount:   input.recorder.requestCount(),
-		ResponseCount:  len(input.recorder.responses()),
-		Truncated:      false,
+		ResponseCount:  input.recorder.responseCount(),
+		Truncated:      input.recorder.truncated,
 		ErrorCategory:  invokeDiagnosticCategory(invokeDiagnostic),
 		ErrorCode:      invokeDiagnosticCode(invokeDiagnostic),
 		SummaryPath:    artifacts.SummaryPath,
@@ -620,9 +1119,301 @@ func (s *Service) runClientStreamStaticSequence(ctx context.Context, input clien
 		}
 	}
 
-	s.emitHistoryBackedStreamEvent(finalEvent)
+	s.emitRecordedStreamEvent(input.session, finalEvent)
 	s.emitStreamState(input.session, finalState, "", finishedAt)
 	s.emitStreamCompleted(input.session, finalState, status, finishedAt)
+}
+
+func (s *Service) runClientStreamInteractiveCompletion(ctx context.Context, session *activeStreamSession, client *interactiveClientStreamSession) {
+	invokeResult, invokeDiagnostic := s.grpcRuntime.ReceiveClientStreamResponse(ClientStreamReceiveRequest{
+		Method:     client.method,
+		Descriptor: client.methodDesc,
+		Stream:     client.stream,
+	})
+	s.completeClientStreamInteractiveSession(ctx, session, client, invokeResult, invokeDiagnostic, contracts.StreamStateHalfClosedLocal)
+}
+
+func (s *Service) runBidiStreamReceiveLoop(ctx context.Context, session *activeStreamSession, client *interactiveClientStreamSession, idleTimeout time.Duration) {
+	consumeResult, consumeDiagnostic := s.grpcRuntime.ConsumeServerStream(ServerStreamConsumeRequest{
+		Method:      client.method,
+		Descriptor:  client.methodDesc,
+		Stream:      client.stream.Stream,
+		Cancel:      client.cancel,
+		IdleTimeout: idleTimeout,
+		OnHeaders: func(headers map[string][]string, ts time.Time) {
+			client.mu.Lock()
+			if client.completed {
+				client.mu.Unlock()
+				return
+			}
+			event := client.recorder.recordHeaders(headers, ts)
+			client.mu.Unlock()
+			s.emitRecordedStreamEvent(session, event)
+		},
+		OnMessage: func(message ServerStreamMessage) {
+			client.mu.Lock()
+			if client.completed {
+				client.mu.Unlock()
+				return
+			}
+			event := client.recorder.recordMessageReceived(message)
+			client.mu.Unlock()
+			s.emitRecordedStreamEvent(session, event)
+		},
+	})
+
+	s.completeBidiStreamSession(ctx, session, client, consumeResult, consumeDiagnostic)
+}
+
+func (s *Service) completeBidiStreamSession(
+	ctx context.Context,
+	session *activeStreamSession,
+	client *interactiveClientStreamSession,
+	consumeResult ServerStreamConsumeResult,
+	consumeDiagnostic *endpointDiagnostic,
+) {
+	client.mu.Lock()
+	if client.completed {
+		client.mu.Unlock()
+		return
+	}
+	client.completed = true
+	client.mu.Unlock()
+
+	defer func() {
+		client.cancel()
+		_ = client.conn.Close()
+		s.removeActiveStreamSession(session.sessionID)
+	}()
+
+	finishedAt := consumeResult.FinishedAt
+	if finishedAt.IsZero() {
+		finishedAt = s.now().UTC()
+	}
+	duration := finishedAt.Sub(client.startedAt)
+	status := consumeResult.Status
+	if status.Code == "" {
+		status = statusFromDiagnostic(consumeDiagnostic)
+	}
+
+	finalState := contracts.StreamStateClosed
+	if consumeDiagnostic != nil {
+		finalState = contracts.StreamStateError
+		if consumeDiagnostic.Category == contracts.ErrorCategoryCancelled {
+			finalState = contracts.StreamStateCancelled
+		}
+	}
+
+	if len(consumeResult.Trailers) > 0 || status.Code != "" {
+		client.mu.Lock()
+		event := client.recorder.recordTrailers(status, consumeResult.Trailers, finishedAt)
+		client.mu.Unlock()
+		s.emitRecordedStreamEvent(session, event)
+	}
+
+	client.mu.Lock()
+	finalEvent := client.recorder.recordFinished(finalState, status, consumeDiagnostic, duration, finishedAt)
+	requestCount := client.recorder.requestCount()
+	responseCount := client.recorder.responseCount()
+	requestBody := client.recorder.requestBody()
+	responseBodies := client.recorder.responses()
+	events := client.recorder.eventsSnapshot()
+	truncated := client.recorder.truncated
+	client.mu.Unlock()
+
+	if consumeDiagnostic != nil {
+		diagnosticEvent := s.emitDiagnostic("bidi-stream", finishedAt, consumeDiagnostic)
+		if consumeDiagnostic.Category != contracts.ErrorCategoryCancelled {
+			s.emitStreamError(session, diagnosticEvent, consumeDiagnostic, finishedAt)
+		}
+	}
+
+	artifacts, artifactErr := s.eventLog.WriteStreamCall(ctx, StreamEventLogRecord{
+		CallID:         session.callID,
+		RequestBody:    requestBody,
+		ResponseBodies: responseBodies,
+		Headers:        consumeResult.Headers,
+		Trailers:       consumeResult.Trailers,
+		Status:         status,
+		Events:         events,
+	})
+	if artifactErr != nil {
+		s.emitDiagnostic("bidi-stream", finishedAt, &endpointDiagnostic{
+			Level:    "error",
+			Code:     "application.history_write_artifacts_failed",
+			Category: contracts.ErrorCategoryApplication,
+			Message:  "The runtime could not write the streaming session history artifacts.",
+			Details:  map[string]string{"cause": artifactErr.Error()},
+		})
+	}
+
+	summary := contracts.HistoryCallSummary{
+		CallID:         session.callID,
+		SessionID:      session.sessionID,
+		WorkspaceID:    client.scope.ID,
+		Method:         client.method.FullName,
+		RPCType:        contracts.RPCTypeBidiStream,
+		EndpointID:     client.endpoint.ID,
+		State:          finalState,
+		GRPCStatusCode: status.Code,
+		StartedAt:      client.startedAt.Format(time.RFC3339Nano),
+		FinishedAt:     finishedAt.Format(time.RFC3339Nano),
+		DurationMs:     duration.Milliseconds(),
+		RequestCount:   requestCount,
+		ResponseCount:  responseCount,
+		Truncated:      truncated,
+		ErrorCategory:  invokeDiagnosticCategory(consumeDiagnostic),
+		ErrorCode:      invokeDiagnosticCode(consumeDiagnostic),
+		SummaryPath:    artifacts.SummaryPath,
+		SessionLogPath: artifacts.SessionLogPath,
+	}
+	if artifactErr == nil {
+		if err := s.historyStore.SaveCallSummary(ctx, summary); err != nil {
+			s.emitDiagnostic("bidi-stream", finishedAt, &endpointDiagnostic{
+				Level:    "error",
+				Code:     "application.history_save_failed",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The runtime could not save the streaming call summary.",
+				Details:  map[string]string{"cause": err.Error()},
+			})
+		}
+	}
+
+	session.mu.Lock()
+	previousState := session.state
+	session.mu.Unlock()
+
+	s.emitRecordedStreamEvent(session, finalEvent)
+	s.emitStreamState(session, finalState, previousState, finishedAt)
+	s.emitStreamCompleted(session, finalState, status, finishedAt)
+}
+
+func (s *Service) completeClientStreamInteractiveSession(
+	ctx context.Context,
+	session *activeStreamSession,
+	client *interactiveClientStreamSession,
+	invokeResult ClientStreamInvokeResult,
+	invokeDiagnostic *endpointDiagnostic,
+	previousState contracts.StreamState,
+) {
+	client.mu.Lock()
+	if client.completed {
+		client.mu.Unlock()
+		return
+	}
+	client.completed = true
+	client.mu.Unlock()
+
+	defer func() {
+		client.cancel()
+		_ = client.conn.Close()
+		s.removeActiveStreamSession(session.sessionID)
+	}()
+
+	finishedAt := invokeResult.FinishedAt
+	if finishedAt.IsZero() {
+		finishedAt = s.now().UTC()
+	}
+	duration := finishedAt.Sub(client.startedAt)
+	status := invokeResult.Status
+	if status.Code == "" {
+		status = statusFromDiagnostic(invokeDiagnostic)
+	}
+
+	finalState := contracts.StreamStateClosed
+	if invokeDiagnostic != nil {
+		finalState = contracts.StreamStateError
+		if invokeDiagnostic.Category == contracts.ErrorCategoryCancelled {
+			finalState = contracts.StreamStateCancelled
+		}
+	}
+
+	if len(invokeResult.Headers) > 0 {
+		event := client.recorder.recordHeaders(invokeResult.Headers, finishedAt)
+		s.emitRecordedStreamEvent(session, event)
+	}
+	if invokeResult.ResponseBody != nil {
+		message := ServerStreamMessage{
+			Body:       invokeResult.ResponseBody,
+			Index:      0,
+			SizeBytes:  measureJSONSize(invokeResult.ResponseBody),
+			ReceivedAt: finishedAt,
+		}
+		event := client.recorder.recordMessageReceived(message)
+		s.emitRecordedStreamEvent(session, event)
+	}
+	if len(invokeResult.Trailers) > 0 || status.Code != "" {
+		event := client.recorder.recordTrailers(status, invokeResult.Trailers, finishedAt)
+		s.emitRecordedStreamEvent(session, event)
+	}
+	finalEvent := client.recorder.recordFinished(finalState, status, invokeDiagnostic, duration, finishedAt)
+
+	if invokeDiagnostic != nil {
+		diagnosticEvent := s.emitDiagnostic(streamDiagnosticSource(client.method.RPCType), finishedAt, invokeDiagnostic)
+		if invokeDiagnostic.Category != contracts.ErrorCategoryCancelled {
+			s.emitStreamError(session, diagnosticEvent, invokeDiagnostic, finishedAt)
+		}
+	}
+
+	artifacts, artifactErr := s.eventLog.WriteStreamCall(ctx, StreamEventLogRecord{
+		CallID:         session.callID,
+		RequestBody:    client.recorder.requestBody(),
+		ResponseBodies: client.recorder.responses(),
+		Headers:        invokeResult.Headers,
+		Trailers:       invokeResult.Trailers,
+		Status:         status,
+		Events:         client.recorder.eventsSnapshot(),
+	})
+	if artifactErr != nil {
+		s.emitDiagnostic("client-stream", finishedAt, &endpointDiagnostic{
+			Level:    "error",
+			Code:     "application.history_write_artifacts_failed",
+			Category: contracts.ErrorCategoryApplication,
+			Message:  "The runtime could not write the streaming session history artifacts.",
+			Details:  map[string]string{"cause": artifactErr.Error()},
+		})
+	}
+
+	rpcType := client.method.RPCType
+	if rpcType == "" {
+		rpcType = contracts.RPCTypeClientStream
+	}
+
+	summary := contracts.HistoryCallSummary{
+		CallID:         session.callID,
+		SessionID:      session.sessionID,
+		WorkspaceID:    client.scope.ID,
+		Method:         client.method.FullName,
+		RPCType:        rpcType,
+		EndpointID:     client.endpoint.ID,
+		State:          finalState,
+		GRPCStatusCode: status.Code,
+		StartedAt:      client.startedAt.Format(time.RFC3339Nano),
+		FinishedAt:     finishedAt.Format(time.RFC3339Nano),
+		DurationMs:     duration.Milliseconds(),
+		RequestCount:   client.recorder.requestCount(),
+		ResponseCount:  client.recorder.responseCount(),
+		Truncated:      client.recorder.truncated,
+		ErrorCategory:  invokeDiagnosticCategory(invokeDiagnostic),
+		ErrorCode:      invokeDiagnosticCode(invokeDiagnostic),
+		SummaryPath:    artifacts.SummaryPath,
+		SessionLogPath: artifacts.SessionLogPath,
+	}
+	if artifactErr == nil {
+		if err := s.historyStore.SaveCallSummary(ctx, summary); err != nil {
+			s.emitDiagnostic("client-stream", finishedAt, &endpointDiagnostic{
+				Level:    "error",
+				Code:     "application.history_save_failed",
+				Category: contracts.ErrorCategoryApplication,
+				Message:  "The runtime could not save the streaming call summary.",
+				Details:  map[string]string{"cause": err.Error()},
+			})
+		}
+	}
+
+	s.emitRecordedStreamEvent(session, finalEvent)
+	s.emitStreamState(session, finalState, previousState, finishedAt)
+	s.emitStreamCompleted(session, finalState, status, finishedAt)
 }
 
 func serverStreamRequestBody(methodDescriptor protoreflect.MethodDescriptor, input contracts.CallStartStreamInput) (any, *contracts.ErrorEnvelope) {
@@ -649,7 +1440,7 @@ func clientStreamRequestMessages(input contracts.CallStartStreamInput) ([]any, *
 		return nil, &contracts.ErrorEnvelope{
 			Code:     "validation.client_stream_static_sequence_required",
 			Category: contracts.ErrorCategoryValidation,
-			Message:  "Client-streaming calls require a static request message sequence for Slice 3.2.",
+			Message:  "Client-streaming calls require a static request message sequence in static-sequence mode.",
 		}
 	}
 
@@ -657,7 +1448,7 @@ func clientStreamRequestMessages(input contracts.CallStartStreamInput) ([]any, *
 		return nil, &contracts.ErrorEnvelope{
 			Code:     "validation.client_stream_static_sequence_required",
 			Category: contracts.ErrorCategoryValidation,
-			Message:  "Client-streaming calls require static-sequence request mode for Slice 3.2.",
+			Message:  "Client-streaming calls require static-sequence request mode for static sequence execution.",
 			Details: map[string]string{
 				"mode": string(input.RequestSpec.Mode),
 			},
@@ -690,6 +1481,35 @@ func streamRequestMessagesBody(messages []any) any {
 	}
 
 	return append([]any(nil), messages...)
+}
+
+func streamDiagnosticSource(rpcType contracts.RPCType) string {
+	if rpcType == contracts.RPCTypeBidiStream {
+		return "bidi-stream"
+	}
+	if rpcType == contracts.RPCTypeServerStream {
+		return "server-stream"
+	}
+	return "client-stream"
+}
+
+func normalizeEventRetentionPolicy(policy EventRetentionPolicy) EventRetentionPolicy {
+	if policy.MaxEventsPerCall <= 0 {
+		policy.MaxEventsPerCall = DefaultMaxEventsPerCall
+	}
+	if policy.MaxBytesPerCall <= 0 {
+		policy.MaxBytesPerCall = DefaultMaxBytesPerCall
+	}
+
+	return policy
+}
+
+func (s *Service) eventRetentionForScope(scope WorkspaceContext) EventRetentionPolicy {
+	if scope.EventRetention.MaxEventsPerCall > 0 || scope.EventRetention.MaxBytesPerCall > 0 {
+		return normalizeEventRetentionPolicy(scope.EventRetention)
+	}
+
+	return s.eventRetention
 }
 
 func resolveServerStreamIdleTimeout(endpointPreset contracts.EndpointPreset, callOptions contracts.CallOptions) time.Duration {
@@ -760,6 +1580,7 @@ func (s *Service) emitStreamState(session *activeStreamSession, state contracts.
 		previous = session.state
 	}
 	session.state = state
+	conditions := append([]contracts.SessionCondition(nil), session.conditions...)
 	session.mu.Unlock()
 
 	if s.emitter == nil {
@@ -771,9 +1592,16 @@ func (s *Service) emitStreamState(session *activeStreamSession, state contracts.
 		CallID:        session.callID,
 		State:         state,
 		PreviousState: previous,
-		Conditions:    []contracts.SessionCondition{},
+		Conditions:    conditions,
 		Timestamp:     ts.Format(time.RFC3339Nano),
 	})
+}
+
+func (s *Service) emitRecordedStreamEvent(session *activeStreamSession, recorded recordedStreamEvent) {
+	s.emitHistoryBackedStreamEvent(recorded.event)
+	if recorded.retention.truncated {
+		s.markStreamTruncated(session, recorded.retention)
+	}
 }
 
 func (s *Service) emitHistoryBackedStreamEvent(event contracts.HistoryLogEvent) {
@@ -797,6 +1625,28 @@ func (s *Service) emitHistoryBackedStreamEvent(event contracts.HistoryLogEvent) 
 	})
 }
 
+func (s *Service) markStreamTruncated(session *activeStreamSession, retention streamRetentionSnapshot) {
+	session.mu.Lock()
+	if sessionHasCondition(session.conditions, contracts.SessionConditionTruncated) {
+		session.mu.Unlock()
+		return
+	}
+	session.conditions = append(session.conditions, contracts.SessionConditionTruncated)
+	state := session.state
+	session.mu.Unlock()
+
+	ts := s.now().UTC()
+	s.emitDiagnostic(streamDiagnosticSource(retention.rpcType), ts, &endpointDiagnostic{
+		Level:    "warning",
+		Code:     "application.stream_event_retention_truncated",
+		Category: contracts.ErrorCategoryApplication,
+		Message:  "The streaming event log reached the configured retention limit and was marked truncated.",
+		NextStep: "Export the session before increasing stream volume, or raise event retention limits in workspace settings.",
+		Details:  retention.details(),
+	})
+	s.emitStreamState(session, state, state, ts)
+}
+
 func (s *Service) emitStreamError(session *activeStreamSession, diagnosticEvent *contracts.DiagnosticsUpdateEvent, diagnostic *endpointDiagnostic, ts time.Time) {
 	if s.emitter == nil {
 		return
@@ -816,6 +1666,10 @@ func (s *Service) emitStreamError(session *activeStreamSession, diagnosticEvent 
 }
 
 func (s *Service) emitStreamCompleted(session *activeStreamSession, finalState contracts.StreamState, status contracts.StreamStatus, ts time.Time) {
+	session.mu.Lock()
+	conditions := append([]contracts.SessionCondition(nil), session.conditions...)
+	session.mu.Unlock()
+
 	if s.emitter == nil {
 		return
 	}
@@ -824,32 +1678,112 @@ func (s *Service) emitStreamCompleted(session *activeStreamSession, finalState c
 		SessionID:  session.sessionID,
 		CallID:     session.callID,
 		FinalState: finalState,
-		Conditions: []contracts.SessionCondition{},
+		Conditions: conditions,
 		Status:     status,
 		Timestamp:  ts.Format(time.RFC3339Nano),
 	})
 }
 
-func newStreamHistoryRecorder(callID, sessionID, method string, rpcType contracts.RPCType) *streamHistoryRecorder {
+func (s *Service) newStreamHistoryRecorder(scope WorkspaceContext, callID, sessionID, method string, rpcType contracts.RPCType) *streamHistoryRecorder {
 	return &streamHistoryRecorder{
 		callID:       callID,
 		sessionID:    sessionID,
 		method:       method,
 		rpcType:      rpcType,
+		retention:    s.eventRetentionForScope(scope),
 		nextSequence: 1,
 	}
 }
 
-func (r *streamHistoryRecorder) append(event contracts.HistoryLogEvent) contracts.HistoryLogEvent {
+func (r *streamHistoryRecorder) append(event contracts.HistoryLogEvent) recordedStreamEvent {
 	event.CallID = r.callID
 	event.SessionID = r.sessionID
 	event.Sequence = r.nextSequence
 	r.nextSequence++
-	r.events = append(r.events, event)
-	return event
+	r.totalEvents++
+
+	eventSize := measureJSONSize(event)
+	retained := r.retainNextEvent(eventSize)
+	if retained {
+		r.events = append(r.events, event)
+		r.retainedBytes += eventSize
+	} else {
+		r.droppedEvents++
+	}
+
+	return recordedStreamEvent{
+		event:     event,
+		retained:  retained,
+		retention: r.retentionSnapshot(),
+	}
 }
 
-func (r *streamHistoryRecorder) recordCallStarted(workspaceID, endpointID string, requestBody any, metadata map[string]string, ts time.Time) contracts.HistoryLogEvent {
+func (r *streamHistoryRecorder) retainNextEvent(eventSize int64) bool {
+	if r.truncated {
+		return false
+	}
+	if r.retention.MaxEventsPerCall > 0 && len(r.events)+1 > r.retention.MaxEventsPerCall {
+		r.markTruncated("max_events_per_call")
+		return false
+	}
+	if r.retention.MaxBytesPerCall > 0 && r.retainedBytes+eventSize > r.retention.MaxBytesPerCall {
+		r.markTruncated("max_bytes_per_call")
+		return false
+	}
+
+	return true
+}
+
+func (r *streamHistoryRecorder) markTruncated(reason string) {
+	if r.truncated {
+		return
+	}
+	r.truncated = true
+	r.truncatedCause = reason
+}
+
+func (r *streamHistoryRecorder) retentionSnapshot() streamRetentionSnapshot {
+	return streamRetentionSnapshot{
+		rpcType:          r.rpcType,
+		truncated:        r.truncated,
+		reason:           r.truncatedCause,
+		maxEventsPerCall: r.retention.MaxEventsPerCall,
+		maxBytesPerCall:  r.retention.MaxBytesPerCall,
+		retainedEvents:   len(r.events),
+		retainedBytes:    r.retainedBytes,
+		totalEvents:      r.totalEvents,
+		droppedEvents:    r.droppedEvents,
+	}
+}
+
+func (r streamRetentionSnapshot) details() map[string]string {
+	reason := r.reason
+	if reason == "" {
+		reason = "retention_limit_reached"
+	}
+
+	return map[string]string{
+		"reason":           reason,
+		"maxEventsPerCall": fmt.Sprintf("%d", r.maxEventsPerCall),
+		"maxBytesPerCall":  fmt.Sprintf("%d", r.maxBytesPerCall),
+		"retainedEvents":   fmt.Sprintf("%d", r.retainedEvents),
+		"retainedBytes":    fmt.Sprintf("%d", r.retainedBytes),
+		"totalEvents":      fmt.Sprintf("%d", r.totalEvents),
+		"droppedEvents":    fmt.Sprintf("%d", r.droppedEvents),
+	}
+}
+
+func sessionHasCondition(conditions []contracts.SessionCondition, condition contracts.SessionCondition) bool {
+	for _, existing := range conditions {
+		if existing == condition {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (r *streamHistoryRecorder) recordCallStarted(workspaceID, endpointID string, requestBody any, metadata map[string]string, ts time.Time) recordedStreamEvent {
 	return r.append(contracts.HistoryLogEvent{
 		Kind:      "call_started",
 		Direction: "sent",
@@ -869,11 +1803,10 @@ func (r *streamHistoryRecorder) recordCallStarted(workspaceID, endpointID string
 	})
 }
 
-func (r *streamHistoryRecorder) recordMessageSent(requestBody any, ts time.Time) contracts.HistoryLogEvent {
-	messageIndex := len(r.requestBodies)
-	r.requestBodies = append(r.requestBodies, requestBody)
-
-	return r.append(contracts.HistoryLogEvent{
+func (r *streamHistoryRecorder) recordMessageSent(requestBody any, ts time.Time) recordedStreamEvent {
+	messageIndex := r.requestTotal
+	r.requestTotal++
+	recorded := r.append(contracts.HistoryLogEvent{
 		Kind:         "message_sent",
 		Direction:    "sent",
 		MessageIndex: messageIndex,
@@ -883,9 +1816,14 @@ func (r *streamHistoryRecorder) recordMessageSent(requestBody any, ts time.Time)
 		},
 		Timestamp: ts.Format(time.RFC3339Nano),
 	})
+	if recorded.retained {
+		r.requestBodies = append(r.requestBodies, requestBody)
+	}
+
+	return recorded
 }
 
-func (r *streamHistoryRecorder) recordLocalHalfClose(ts time.Time) contracts.HistoryLogEvent {
+func (r *streamHistoryRecorder) recordLocalHalfClose(ts time.Time) recordedStreamEvent {
 	return r.append(contracts.HistoryLogEvent{
 		Kind:      "send_half_closed",
 		Direction: "sent",
@@ -896,7 +1834,7 @@ func (r *streamHistoryRecorder) recordLocalHalfClose(ts time.Time) contracts.His
 	})
 }
 
-func (r *streamHistoryRecorder) recordHeaders(headers map[string][]string, ts time.Time) contracts.HistoryLogEvent {
+func (r *streamHistoryRecorder) recordHeaders(headers map[string][]string, ts time.Time) recordedStreamEvent {
 	redactedHeaders := redactMetadataValues(headers)
 	return r.append(contracts.HistoryLogEvent{
 		Kind:      "headers_received",
@@ -911,9 +1849,9 @@ func (r *streamHistoryRecorder) recordHeaders(headers map[string][]string, ts ti
 	})
 }
 
-func (r *streamHistoryRecorder) recordMessageReceived(message ServerStreamMessage) contracts.HistoryLogEvent {
-	r.responseBodies = append(r.responseBodies, message.Body)
-	return r.append(contracts.HistoryLogEvent{
+func (r *streamHistoryRecorder) recordMessageReceived(message ServerStreamMessage) recordedStreamEvent {
+	r.responseTotal++
+	recorded := r.append(contracts.HistoryLogEvent{
 		Kind:         "message_received",
 		Direction:    "received",
 		MessageIndex: message.Index,
@@ -923,9 +1861,14 @@ func (r *streamHistoryRecorder) recordMessageReceived(message ServerStreamMessag
 		},
 		Timestamp: message.ReceivedAt.Format(time.RFC3339Nano),
 	})
+	if recorded.retained {
+		r.responseBodies = append(r.responseBodies, message.Body)
+	}
+
+	return recorded
 }
 
-func (r *streamHistoryRecorder) recordTrailers(status contracts.StreamStatus, trailers map[string][]string, ts time.Time) contracts.HistoryLogEvent {
+func (r *streamHistoryRecorder) recordTrailers(status contracts.StreamStatus, trailers map[string][]string, ts time.Time) recordedStreamEvent {
 	redactedTrailers := redactMetadataValues(trailers)
 	return r.append(contracts.HistoryLogEvent{
 		Kind:      "trailers_received",
@@ -944,7 +1887,7 @@ func (r *streamHistoryRecorder) recordTrailers(status contracts.StreamStatus, tr
 	})
 }
 
-func (r *streamHistoryRecorder) recordFinished(finalState contracts.StreamState, streamStatus contracts.StreamStatus, diagnostic *endpointDiagnostic, duration time.Duration, ts time.Time) contracts.HistoryLogEvent {
+func (r *streamHistoryRecorder) recordFinished(finalState contracts.StreamState, streamStatus contracts.StreamStatus, diagnostic *endpointDiagnostic, duration time.Duration, ts time.Time) recordedStreamEvent {
 	kind := "call_finished"
 	if finalState == contracts.StreamStateError {
 		kind = "call_failed"
@@ -974,7 +1917,11 @@ func (r *streamHistoryRecorder) requestBody() any {
 }
 
 func (r *streamHistoryRecorder) requestCount() int {
-	return len(r.requestBodies)
+	return r.requestTotal
+}
+
+func (r *streamHistoryRecorder) responseCount() int {
+	return r.responseTotal
 }
 
 func (r *streamHistoryRecorder) responses() []any {

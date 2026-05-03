@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { EventsOn } from '../../../wailsjs/runtime/runtime'
   import type {
     BootstrapData,
@@ -14,6 +14,8 @@
     JsonValue,
     ProtoCatalogResult,
     ReflectionCatalogResult,
+    RequestMode,
+    SessionCondition,
     RequestSaveResult,
     StreamMessage,
     StreamCompletedEvent,
@@ -39,6 +41,7 @@
     cancelStream,
     createWorkspace,
     getHistory,
+    halfCloseStream,
     invokeUnary,
     listHistory,
     loadCatalogFromProtoSources,
@@ -46,10 +49,23 @@
     openWorkspace,
     saveRequest,
     saveWorkspace,
+    sendStreamMessage,
     startStream,
     testEndpoint,
     validateWorkspace,
   } from '../wails/backend'
+  import {
+    TIMELINE_ROW_HEIGHT_PX,
+    appendOrderedStreamEvent,
+    computeTimelineWindow,
+    filterStreamEvents,
+    findFirstErrorEvent,
+    isNearTimelineTail,
+    streamEventKindOptions,
+    timelineScrollTopForIndex,
+    timelineTailScrollTop,
+    type TimelineDirectionFilter,
+  } from '../stream-timeline'
 
   export let bootstrap: BootstrapData
   export let contractMismatch: string[]
@@ -87,6 +103,7 @@
   let invokeResult: CallInvokeUnaryResult | null = null
   let streamStartResult: CallStartStreamResult | null = null
   let streamState: StreamState = 'idle'
+  let streamConditions: SessionCondition[] = []
   let streamEvents: StreamEventRecord[] = []
   let streamError: StreamErrorEvent | null = null
   let streamCompleted: StreamCompletedEvent | null = null
@@ -95,6 +112,7 @@
   let activeWorkspace: WorkspaceSnapshot | null = null
   let selectedHistoryCallId = ''
   let selectedCatalogMode: CatalogSourceKind = 'reflection'
+  let clientStreamMode: RequestMode = 'static-sequence'
   let workspacePath = ''
   let workspaceName = 'workspace'
   let savedRequestId = ''
@@ -113,6 +131,8 @@
   let protoPending = false
   let invokePending = false
   let streamPending = false
+  let sendPending = false
+  let halfClosePending = false
   let cancelPending = false
   let historyPending = false
   let historyDetailPending = false
@@ -125,6 +145,18 @@
   let metadataDrafts: Record<string, string> = {}
   let workspaceIssues: WorkspaceValidationIssue[] = []
   let actionErrorContextRows: Array<{ label: string; value: string }> = []
+  let hasActiveLiveStream = false
+  let filteredStreamEvents: StreamEventRecord[] = []
+  let timelineKindOptions: string[] = []
+  let timelineWindow = computeTimelineWindow<StreamEventRecord>([])
+  let firstTimelineError: StreamEventRecord | null = null
+  let hasTruncatedCondition = false
+  let timelineViewport: HTMLDivElement | null = null
+  let timelineScrollTop = 0
+  let timelineViewportHeight = TIMELINE_ROW_HEIGHT_PX * 3
+  let timelineDirectionFilter: TimelineDirectionFilter = 'all'
+  let timelineKindFilter = 'all'
+  let timelineAtLiveTail = true
 
   onMount(() => {
     void refreshHistory()
@@ -134,12 +166,21 @@
         return
       }
       streamState = payload.state
+      streamConditions = payload.conditions ?? []
     })
     const offEvent = EventsOn('stream:event', (payload: StreamEventRecord) => {
       if (!acceptStreamEvent(payload.sessionId)) {
         return
       }
-      streamEvents = [...streamEvents, payload].sort((left, right) => left.seq - right.seq)
+      const shouldFollowTail = timelineAtLiveTail || isTimelineViewportNearTail()
+      if (appendOrderedStreamEvent(streamEvents, payload)) {
+        streamEvents = streamEvents
+        if (shouldFollowTail) {
+          void scrollTimelineToTail()
+        } else {
+          timelineAtLiveTail = false
+        }
+      }
     })
     const offError = EventsOn('stream:error', (payload: StreamErrorEvent) => {
       if (!acceptStreamEvent(payload.sessionId)) {
@@ -155,6 +196,7 @@
       }
       streamCompleted = payload
       streamState = payload.finalState
+      streamConditions = payload.conditions ?? []
       const rpcType = streamStartResult?.rpcType ? formatRpcType(streamStartResult.rpcType) : $i18n.t('footer.stream')
       infoMessage =
         payload.finalState === 'closed'
@@ -173,6 +215,19 @@
   })
 
   $: actionErrorContextRows = getDiagnosticContextRows(actionErrorDetails, $i18n.language)
+  $: hasActiveLiveStream = streamStartResult !== null && !isTerminalState(streamState)
+  $: filteredStreamEvents = filterStreamEvents(streamEvents, {
+    direction: timelineDirectionFilter,
+    kind: timelineKindFilter,
+  })
+  $: timelineKindOptions = streamEventKindOptions(streamEvents)
+  $: timelineWindow = computeTimelineWindow(filteredStreamEvents, {
+    scrollTop: timelineScrollTop,
+    viewportHeight: timelineViewportHeight,
+  })
+  $: firstTimelineError = findFirstErrorEvent(streamEvents)
+  $: hasTruncatedCondition =
+    streamConditions.includes('truncated') || (streamCompleted?.conditions ?? []).includes('truncated')
 
   function buildEndpointPreset(): EndpointPreset {
     const tlsMode = endpoint.tls.mode
@@ -268,7 +323,9 @@
       nextProtoFingerprint !== lastProtoFingerprint &&
       activeCatalog?.kind === 'proto'
 
-    if (endpointChanged || protoInputsChanged || catalogModeChanged) {
+    if ((endpointChanged || protoInputsChanged || catalogModeChanged) && hasActiveLiveStream) {
+      showActiveLiveStreamGuard()
+    } else if (endpointChanged || protoInputsChanged || catalogModeChanged) {
       endpointTestResult = null
       activeCatalog = null
       selectedMethod = null
@@ -306,8 +363,10 @@
     return endpoint.tls.mode === mode
   }
 
-  function methodDraftKey(method: CatalogMethod): string {
-    return `${activeCatalog?.kind ?? 'reflection'}::${activeCatalog?.endpoint.id ?? 'transient'}::${method.fullName}`
+  function methodDraftKey(method: CatalogMethod, mode: RequestMode = clientStreamMode): string {
+    const requestMode =
+      method.rpcType === 'client_stream' ? mode : method.rpcType === 'bidi_stream' ? 'interactive' : 'static-sequence'
+    return `${activeCatalog?.kind ?? 'reflection'}::${activeCatalog?.endpoint.id ?? 'transient'}::${method.fullName}::${requestMode}`
   }
 
   function formatJsonValue(value: JsonValue | undefined): string {
@@ -321,7 +380,13 @@
   function defaultDraftForMethod(method: CatalogMethod): string {
     const template = activeCatalog?.requestTemplates?.[method.fullName]
     if (method.rpcType === 'client_stream') {
+      if (clientStreamMode === 'interactive') {
+        return formatJsonValue(template)
+      }
       return formatJsonValue([template ?? {}])
+    }
+    if (method.rpcType === 'bidi_stream') {
+      return formatJsonValue(template)
     }
 
     return formatJsonValue(template)
@@ -338,6 +403,13 @@
   }
 
   function selectMethod(method: CatalogMethod): void {
+    if (hasActiveLiveStream) {
+      if (selectedMethod?.fullName !== method.fullName) {
+        showActiveLiveStreamGuard()
+      }
+      return
+    }
+
     selectedMethod = method
     invokeResult = null
     clearStreamView()
@@ -350,6 +422,21 @@
     const key = methodDraftKey(method)
     requestBodyText = bodyDrafts[key] ?? defaultDraftForMethod(method)
     metadataText = metadataDrafts[key] ?? '{}'
+  }
+
+  function showActiveLiveStreamGuard(): boolean {
+    if (!hasActiveLiveStream || !streamStartResult) {
+      return true
+    }
+
+    actionError = $i18n.t('stream.contextLocked', { callId: streamStartResult.callId })
+    actionErrorDetails = {
+      sessionId: streamStartResult.sessionId,
+      state: streamState,
+      method: streamStartResult.method,
+    }
+    infoMessage = $i18n.t('stream.contextLockedInfo', { callId: streamStartResult.callId })
+    return false
   }
 
   function updateBodyDraft(value: string): void {
@@ -370,6 +457,21 @@
         [methodDraftKey(selectedMethod)]: value,
       }
     }
+  }
+
+  function updateClientStreamMode(mode: RequestMode): void {
+    if (hasActiveLiveStream) {
+      showActiveLiveStreamGuard()
+      return
+    }
+
+    clientStreamMode = mode
+    if (!selectedMethod || selectedMethod.rpcType !== 'client_stream') {
+      return
+    }
+
+    requestBodyText = bodyDrafts[methodDraftKey(selectedMethod, mode)] ?? defaultDraftForMethod(selectedMethod)
+    requestBodyError = ''
   }
 
   function parseBodyText(): JsonValue | null {
@@ -402,6 +504,15 @@
       requestBodyError = error instanceof Error ? error.message : $i18n.t('errors.requestBodyJson')
       return null
     }
+  }
+
+  function parseClientStreamMessage(): StreamMessage | null {
+    const body = parseBodyText()
+    if (body === null) {
+      return null
+    }
+
+    return { body }
   }
 
   function parseMetadataText(): Record<string, string> | null {
@@ -475,6 +586,10 @@
   }
 
   async function runWorkspaceCreate(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
     clearActionError()
     infoMessage = ''
     workspaceIssues = []
@@ -495,6 +610,10 @@
   }
 
   async function runWorkspaceOpen(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
     clearActionError()
     infoMessage = ''
     workspaceIssues = []
@@ -515,6 +634,10 @@
   }
 
   async function runWorkspaceSave(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
     clearActionError()
     infoMessage = ''
     workspaceIssues = []
@@ -532,6 +655,10 @@
   }
 
   async function runWorkspaceValidate(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
     clearActionError()
     infoMessage = ''
     workspaceIssues = []
@@ -565,6 +692,10 @@
   }
 
   async function runEndpointTest(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
     clearActionError()
     infoMessage = ''
     endpointTestResult = null
@@ -599,6 +730,10 @@
   }
 
   async function runReflectionLoad(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
     clearActionError()
     infoMessage = ''
     activeCatalog = null
@@ -631,6 +766,10 @@
   }
 
   async function runProtoLoad(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
     const protoSources = buildProtoSources()
 
     if (protoSources.length === 0) {
@@ -668,6 +807,10 @@
   }
 
   async function runUnaryInvoke(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
     if (!activeCatalog || !selectedMethod) {
       actionError = $i18n.t('errors.selectMethodInvoke')
       actionErrorDetails = undefined
@@ -715,6 +858,10 @@
   }
 
   async function runServerStreamInvoke(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
     if (!activeCatalog || !selectedMethod) {
       actionError = $i18n.t('errors.selectMethodStream')
       actionErrorDetails = undefined
@@ -765,6 +912,10 @@
   }
 
   async function runClientStreamInvoke(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
     if (!activeCatalog || !selectedMethod) {
       actionError = $i18n.t('errors.selectMethodStream')
       actionErrorDetails = undefined
@@ -782,7 +933,7 @@
       return
     }
 
-    const messages = parseClientStreamMessages()
+    const messages = clientStreamMode === 'static-sequence' ? parseClientStreamMessages() : []
     const metadata = parseMetadataText()
     if (messages === null || metadata === null) {
       return
@@ -797,7 +948,7 @@
         rpcType: selectedMethod.rpcType,
         metadata,
         requestSpec: {
-          mode: 'static-sequence',
+          mode: clientStreamMode,
           messages,
         },
       })
@@ -811,6 +962,157 @@
       await refreshHistory()
     } finally {
       streamPending = false
+    }
+  }
+
+  async function runClientStreamSend(): Promise<void> {
+    if (!streamStartResult || streamStartResult.rpcType !== 'client_stream' || streamState !== 'open') {
+      actionError = $i18n.t('errors.clientStreamSendUnavailable')
+      actionErrorDetails = undefined
+      return
+    }
+
+    const message = parseClientStreamMessage()
+    if (message === null) {
+      return
+    }
+
+    clearActionError()
+    sendPending = true
+    try {
+      const sent = await sendStreamMessage({
+        sessionId: streamStartResult.sessionId,
+        message,
+      })
+      infoMessage = $i18n.t('stream.messageSent', { index: sent.messageIndex + 1, callId: sent.callId })
+    } catch (error) {
+      setActionError(error, $i18n.t('errors.clientStreamSend'))
+      await refreshHistory()
+    } finally {
+      sendPending = false
+    }
+  }
+
+  async function runClientStreamHalfClose(): Promise<void> {
+    if (!streamStartResult || streamStartResult.rpcType !== 'client_stream' || streamState !== 'open') {
+      actionError = $i18n.t('errors.clientStreamHalfCloseUnavailable')
+      actionErrorDetails = undefined
+      return
+    }
+
+    clearActionError()
+    halfClosePending = true
+    try {
+      const result = await halfCloseStream({ sessionId: streamStartResult.sessionId })
+      streamState = result.state
+      infoMessage = $i18n.t('stream.halfCloseRequested', { callId: result.callId })
+    } catch (error) {
+      setActionError(error, $i18n.t('errors.clientStreamHalfClose'))
+      await refreshHistory()
+    } finally {
+      halfClosePending = false
+    }
+  }
+
+  async function runBidiStreamInvoke(): Promise<void> {
+    if (!showActiveLiveStreamGuard()) {
+      return
+    }
+
+    if (!activeCatalog || !selectedMethod) {
+      actionError = $i18n.t('errors.selectMethodStream')
+      actionErrorDetails = undefined
+      return
+    }
+
+    clearActionError()
+    infoMessage = ''
+    invokeResult = null
+    clearStreamView()
+
+    if (selectedMethod.rpcType !== 'bidi_stream') {
+      actionError = $i18n.t('errors.streamUnaryOnly')
+      actionErrorDetails = undefined
+      return
+    }
+
+    const metadata = parseMetadataText()
+    if (metadata === null) {
+      return
+    }
+
+    streamPending = true
+    try {
+      const started = await startStream({
+        catalogSource: activeCatalog.kind,
+        endpointId: activeCatalog.endpoint.id ?? '',
+        method: selectedMethod.fullName,
+        rpcType: selectedMethod.rpcType,
+        metadata,
+        requestSpec: {
+          mode: 'interactive',
+          messages: [],
+        },
+      })
+      streamStartResult = started
+      if (!streamCompleted || streamCompleted.sessionId !== started.sessionId) {
+        streamState = started.state
+        infoMessage = $i18n.t('stream.started', { rpcType: formatRpcType(started.rpcType), callId: started.callId })
+      }
+    } catch (error) {
+      setActionError(error, $i18n.t('errors.bidiStreamStart'))
+      await refreshHistory()
+    } finally {
+      streamPending = false
+    }
+  }
+
+  async function runBidiStreamSend(): Promise<void> {
+    if (!streamStartResult || streamStartResult.rpcType !== 'bidi_stream' || streamState !== 'open') {
+      actionError = $i18n.t('errors.bidiStreamSendUnavailable')
+      actionErrorDetails = undefined
+      return
+    }
+
+    const message = parseClientStreamMessage()
+    if (message === null) {
+      return
+    }
+
+    clearActionError()
+    sendPending = true
+    try {
+      const sent = await sendStreamMessage({
+        sessionId: streamStartResult.sessionId,
+        message,
+      })
+      infoMessage = $i18n.t('stream.messageSent', { index: sent.messageIndex + 1, callId: sent.callId })
+    } catch (error) {
+      setActionError(error, $i18n.t('errors.bidiStreamSend'))
+      await refreshHistory()
+    } finally {
+      sendPending = false
+    }
+  }
+
+  async function runBidiStreamHalfClose(): Promise<void> {
+    if (!streamStartResult || streamStartResult.rpcType !== 'bidi_stream' || streamState !== 'open') {
+      actionError = $i18n.t('errors.bidiStreamHalfCloseUnavailable')
+      actionErrorDetails = undefined
+      return
+    }
+
+    clearActionError()
+    halfClosePending = true
+    try {
+      const result = await halfCloseStream({ sessionId: streamStartResult.sessionId })
+      streamState = result.state
+      infoMessage = $i18n.t('stream.halfCloseRequested', { callId: result.callId })
+    } catch (error) {
+      setActionError(error, $i18n.t('errors.bidiStreamHalfClose'))
+      await refreshHistory()
+    } finally {
+      halfClosePending = false
     }
   }
 
@@ -888,7 +1190,23 @@
         return
       }
       if (selectedMethod?.rpcType === 'client_stream') {
+        if (streamStartResult?.rpcType === 'client_stream' && !isTerminalState(streamState)) {
+          if (clientStreamMode === 'interactive' && streamState === 'open') {
+            void runClientStreamSend()
+          }
+          return
+        }
         void runClientStreamInvoke()
+        return
+      }
+      if (selectedMethod?.rpcType === 'bidi_stream') {
+        if (streamStartResult?.rpcType === 'bidi_stream' && !isTerminalState(streamState)) {
+          if (streamState === 'open') {
+            void runBidiStreamSend()
+          }
+          return
+        }
+        void runBidiStreamInvoke()
         return
       }
       void runUnaryInvoke()
@@ -922,13 +1240,101 @@
   function clearStreamView(): void {
     streamStartResult = null
     streamState = 'idle'
+    streamConditions = []
     streamEvents = []
     streamError = null
     streamCompleted = null
+    resetTimelineView()
   }
 
   function acceptStreamEvent(sessionId: string): boolean {
     return streamStartResult?.sessionId === sessionId || (streamPending && streamStartResult === null)
+  }
+
+  function resetTimelineView(): void {
+    timelineScrollTop = 0
+    timelineViewportHeight = timelineViewport?.clientHeight || TIMELINE_ROW_HEIGHT_PX * 3
+    timelineDirectionFilter = 'all'
+    timelineKindFilter = 'all'
+    timelineAtLiveTail = true
+    if (timelineViewport) {
+      timelineViewport.scrollTop = 0
+    }
+  }
+
+  function resetTimelineScrollPosition(): void {
+    timelineScrollTop = 0
+    if (timelineViewport) {
+      timelineViewport.scrollTop = 0
+      timelineViewportHeight = timelineViewport.clientHeight || timelineViewportHeight
+    }
+    timelineAtLiveTail = filteredStreamEvents.length === 0
+  }
+
+  function updateTimelineDirectionFilter(value: TimelineDirectionFilter): void {
+    timelineDirectionFilter = value
+    resetTimelineScrollPosition()
+  }
+
+  function updateTimelineKindFilter(value: string): void {
+    timelineKindFilter = value
+    resetTimelineScrollPosition()
+  }
+
+  function updateTimelineViewportMetrics(): void {
+    if (!timelineViewport) {
+      return
+    }
+
+    timelineScrollTop = timelineViewport.scrollTop
+    timelineViewportHeight = timelineViewport.clientHeight || timelineViewportHeight
+    timelineAtLiveTail = isNearTimelineTail(
+      filteredStreamEvents.length,
+      timelineScrollTop,
+      timelineViewportHeight,
+    )
+  }
+
+  function isTimelineViewportNearTail(): boolean {
+    if (!timelineViewport) {
+      return timelineAtLiveTail
+    }
+
+    return isNearTimelineTail(filteredStreamEvents.length, timelineViewport.scrollTop, timelineViewport.clientHeight)
+  }
+
+  async function scrollTimelineToTail(): Promise<void> {
+    await tick()
+    if (!timelineViewport) {
+      return
+    }
+
+    timelineViewport.scrollTop = timelineTailScrollTop(filteredStreamEvents.length, timelineViewport.clientHeight)
+    updateTimelineViewportMetrics()
+  }
+
+  async function jumpToTimelineEvent(event: StreamEventRecord): Promise<void> {
+    timelineDirectionFilter = 'all'
+    timelineKindFilter = 'all'
+    await tick()
+
+    const targetIndex = filteredStreamEvents.findIndex(
+      (candidate) => candidate.sessionId === event.sessionId && candidate.seq === event.seq,
+    )
+    if (targetIndex === -1 || !timelineViewport) {
+      return
+    }
+
+    timelineViewport.scrollTop = timelineScrollTopForIndex(targetIndex)
+    updateTimelineViewportMetrics()
+  }
+
+  async function jumpToFirstTimelineError(): Promise<void> {
+    if (!firstTimelineError) {
+      return
+    }
+
+    await jumpToTimelineEvent(firstTimelineError)
   }
 
   function isTerminalState(state: StreamState): boolean {
@@ -936,11 +1342,25 @@
   }
 
   function supportsStaticComposer(method: CatalogMethod): boolean {
-    return method.rpcType === 'unary' || method.rpcType === 'server_stream' || method.rpcType === 'client_stream'
+    return (
+      method.rpcType === 'unary' ||
+      method.rpcType === 'server_stream' ||
+      method.rpcType === 'client_stream' ||
+      method.rpcType === 'bidi_stream'
+    )
   }
 
   function bodyEditorLabel(method: CatalogMethod): string {
-    return method.rpcType === 'client_stream' ? $i18n.t('request.clientSequenceJson') : $i18n.t('request.bodyJson')
+    if (method.rpcType === 'bidi_stream') {
+      return $i18n.t('request.bidiMessageJson')
+    }
+    if (method.rpcType === 'client_stream') {
+      return clientStreamMode === 'interactive'
+        ? $i18n.t('request.clientMessageJson')
+        : $i18n.t('request.clientSequenceJson')
+    }
+
+    return $i18n.t('request.bodyJson')
   }
 
   function formatStreamEventPreview(event: StreamEventRecord): string {
@@ -995,16 +1415,16 @@
     </div>
 
     <div class="pill-row">
-      <button class="ghost-button" disabled={workspacePending} on:click={runWorkspaceCreate}>
+      <button class="ghost-button" disabled={workspacePending || hasActiveLiveStream} on:click={runWorkspaceCreate}>
         {workspacePending ? $i18n.t('common.working') : $i18n.t('common.create')}
       </button>
-      <button class="ghost-button" disabled={workspacePending} on:click={runWorkspaceOpen}>
+      <button class="ghost-button" disabled={workspacePending || hasActiveLiveStream} on:click={runWorkspaceOpen}>
         {workspacePending ? $i18n.t('common.working') : $i18n.t('common.open')}
       </button>
-      <button class="action-button" disabled={workspacePending || !activeWorkspace} on:click={runWorkspaceSave}>
+      <button class="action-button" disabled={workspacePending || hasActiveLiveStream || !activeWorkspace} on:click={runWorkspaceSave}>
         {workspacePending ? $i18n.t('common.saving') : $i18n.t('common.save')}
       </button>
-      <button class="ghost-button" disabled={workspacePending || !activeWorkspace} on:click={runWorkspaceValidate}>
+      <button class="ghost-button" disabled={workspacePending || hasActiveLiveStream || !activeWorkspace} on:click={runWorkspaceValidate}>
         {workspacePending ? $i18n.t('common.checking') : $i18n.t('common.validate')}
       </button>
     </div>
@@ -1061,17 +1481,17 @@
       <div class="form-grid">
         <label class="field">
           <span>{$i18n.t('endpoint.target')}</span>
-          <input bind:value={endpoint.target} placeholder="127.0.0.1:50051" />
+          <input bind:value={endpoint.target} disabled={hasActiveLiveStream} placeholder="127.0.0.1:50051" />
         </label>
 
         <label class="field">
           <span>{$i18n.t('endpoint.authority')}</span>
-          <input bind:value={endpoint.authority} placeholder={$i18n.t('endpoint.authorityPlaceholder')} />
+          <input bind:value={endpoint.authority} disabled={hasActiveLiveStream} placeholder={$i18n.t('endpoint.authorityPlaceholder')} />
         </label>
 
         <label class="field">
           <span>{$i18n.t('endpoint.tlsMode')}</span>
-          <select bind:value={endpoint.tls.mode}>
+          <select bind:value={endpoint.tls.mode} disabled={hasActiveLiveStream}>
             <option value="plaintext">{formatTLSMode('plaintext')}</option>
             <option value="system_ca">{formatTLSMode('system_ca')}</option>
             <option value="custom_ca">{formatTLSMode('custom_ca')}</option>
@@ -1081,47 +1501,51 @@
 
         <label class="field">
           <span>{$i18n.t('endpoint.serverNameOverride')}</span>
-          <input bind:value={endpoint.tls.serverNameOverride} placeholder={$i18n.t('endpoint.serverNamePlaceholder')} />
+          <input
+            bind:value={endpoint.tls.serverNameOverride}
+            disabled={hasActiveLiveStream}
+            placeholder={$i18n.t('endpoint.serverNamePlaceholder')}
+          />
         </label>
 
         <label class="field">
           <span>{$i18n.t('endpoint.connectTimeout')}</span>
-          <input bind:value={endpoint.connectTimeoutMs} min="1" type="number" />
+          <input bind:value={endpoint.connectTimeoutMs} disabled={hasActiveLiveStream} min="1" type="number" />
         </label>
 
         <label class="field">
           <span>{$i18n.t('endpoint.requestTimeout')}</span>
-          <input bind:value={endpoint.requestTimeoutMs} min="0" type="number" />
+          <input bind:value={endpoint.requestTimeoutMs} disabled={hasActiveLiveStream} min="0" type="number" />
         </label>
 
         <label class="field">
           <span>{$i18n.t('endpoint.streamIdleTimeout')}</span>
-          <input bind:value={endpoint.streamIdleTimeoutMs} min="0" type="number" />
+          <input bind:value={endpoint.streamIdleTimeoutMs} disabled={hasActiveLiveStream} min="0" type="number" />
         </label>
 
         {#if isTLSMode('custom_ca') || isTLSMode('mtls')}
           <label class="field field--span-2">
             <span>{$i18n.t('endpoint.caSecretRef')}</span>
-            <input bind:value={endpoint.tls.caCert} placeholder="secret-ref:file/tls/ca.pem" />
+            <input bind:value={endpoint.tls.caCert} disabled={hasActiveLiveStream} placeholder="secret-ref:file/tls/ca.pem" />
           </label>
         {/if}
 
         {#if isTLSMode('mtls')}
           <label class="field">
             <span>{$i18n.t('endpoint.clientCertSecretRef')}</span>
-            <input bind:value={endpoint.tls.clientCert} placeholder="secret-ref:file/tls/client.crt" />
+            <input bind:value={endpoint.tls.clientCert} disabled={hasActiveLiveStream} placeholder="secret-ref:file/tls/client.crt" />
           </label>
 
           <label class="field">
             <span>{$i18n.t('endpoint.clientKeySecretRef')}</span>
-            <input bind:value={endpoint.tls.clientKey} placeholder="secret-ref:file/tls/client.key" />
+            <input bind:value={endpoint.tls.clientKey} disabled={hasActiveLiveStream} placeholder="secret-ref:file/tls/client.key" />
           </label>
         {/if}
       </div>
 
       <label class="field">
         <span>{$i18n.t('endpoint.catalogSource')}</span>
-        <select bind:value={selectedCatalogMode}>
+        <select bind:value={selectedCatalogMode} disabled={hasActiveLiveStream}>
           <option value="reflection">{$i18n.t('source.reflection')}</option>
           <option value="proto">{$i18n.t('source.proto')}</option>
         </select>
@@ -1131,17 +1555,32 @@
         <div class="stack">
           <label class="field field--textarea">
             <span>{$i18n.t('endpoint.protoDirectories')}</span>
-            <textarea rows="4" bind:value={protoDirectoriesText} placeholder={$i18n.t('endpoint.protoDirectoriesPlaceholder')}></textarea>
+            <textarea
+              rows="4"
+              bind:value={protoDirectoriesText}
+              disabled={hasActiveLiveStream}
+              placeholder={$i18n.t('endpoint.protoDirectoriesPlaceholder')}
+            ></textarea>
           </label>
 
           <label class="field field--textarea">
             <span>{$i18n.t('endpoint.protoFiles')}</span>
-            <textarea rows="4" bind:value={protoFilesText} placeholder={$i18n.t('endpoint.protoFilesPlaceholder')}></textarea>
+            <textarea
+              rows="4"
+              bind:value={protoFilesText}
+              disabled={hasActiveLiveStream}
+              placeholder={$i18n.t('endpoint.protoFilesPlaceholder')}
+            ></textarea>
           </label>
 
           <label class="field field--textarea">
             <span>{$i18n.t('endpoint.importPaths')}</span>
-            <textarea rows="4" bind:value={importPathsText} placeholder={$i18n.t('endpoint.importPathsPlaceholder')}></textarea>
+            <textarea
+              rows="4"
+              bind:value={importPathsText}
+              disabled={hasActiveLiveStream}
+              placeholder={$i18n.t('endpoint.importPathsPlaceholder')}
+            ></textarea>
           </label>
 
           <div class="subtle">{$i18n.t('endpoint.protoNote')}</div>
@@ -1149,15 +1588,15 @@
       {/if}
 
       <div class="pill-row">
-        <button class="ghost-button" disabled={testPending || reflectionPending || protoPending || invokePending} on:click={runEndpointTest}>
+        <button class="ghost-button" disabled={testPending || reflectionPending || protoPending || invokePending || hasActiveLiveStream} on:click={runEndpointTest}>
           {testPending ? $i18n.t('endpoint.testPending') : $i18n.t('endpoint.runPreflight')}
         </button>
         {#if selectedCatalogMode === 'reflection'}
-          <button class="action-button" disabled={testPending || reflectionPending || protoPending || invokePending} on:click={runReflectionLoad}>
+          <button class="action-button" disabled={testPending || reflectionPending || protoPending || invokePending || hasActiveLiveStream} on:click={runReflectionLoad}>
             {reflectionPending ? $i18n.t('endpoint.loadReflectionPending') : $i18n.t('endpoint.loadReflection')}
           </button>
         {:else}
-          <button class="action-button" disabled={testPending || reflectionPending || protoPending || invokePending} on:click={runProtoLoad}>
+          <button class="action-button" disabled={testPending || reflectionPending || protoPending || invokePending || hasActiveLiveStream} on:click={runProtoLoad}>
             {protoPending ? $i18n.t('endpoint.loadProtoPending') : $i18n.t('endpoint.loadProto')}
           </button>
         {/if}
@@ -1274,7 +1713,12 @@
 
               <div class="catalog-methods">
                 {#each service.methods as method}
-                  <button class:selected-method={isSelectedMethod(method)} class="catalog-method selectable-card" on:click={() => selectMethod(method)}>
+                  <button
+                    class:selected-method={isSelectedMethod(method)}
+                    class="catalog-method selectable-card"
+                    disabled={hasActiveLiveStream}
+                    on:click={() => selectMethod(method)}
+                  >
                     <div class="catalog-method__head">
                       <strong>{method.name}</strong>
                       <span class="badge">{formatRpcType(method.rpcType)}</span>
@@ -1327,10 +1771,24 @@
             </div>
           </div>
 
+          {#if selectedMethod.rpcType === 'client_stream'}
+            <label class="field">
+              <span>{$i18n.t('request.clientStreamMode')}</span>
+              <select
+                value={clientStreamMode}
+                disabled={streamStartResult !== null && !isTerminalState(streamState)}
+                on:change={(event) => updateClientStreamMode((event.currentTarget as HTMLSelectElement).value as RequestMode)}
+              >
+                <option value="static-sequence">{$i18n.t('request.clientStreamModeStatic')}</option>
+                <option value="interactive">{$i18n.t('request.clientStreamModeInteractive')}</option>
+              </select>
+            </label>
+          {/if}
+
           <label class="field field--textarea">
             <span>{bodyEditorLabel(selectedMethod)}</span>
             <textarea
-              rows={selectedMethod.rpcType === 'client_stream' ? 18 : 14}
+              rows={selectedMethod.rpcType === 'client_stream' && clientStreamMode === 'static-sequence' ? 18 : 14}
               value={requestBodyText}
               on:input={(event) => updateBodyDraft((event.currentTarget as HTMLTextAreaElement).value)}
               on:keydown={handleComposerKeydown}
@@ -1364,7 +1822,7 @@
               <button class="ghost-button" disabled={requestSavePending || !activeWorkspace} on:click={runRequestSave}>
                 {requestSavePending ? $i18n.t('request.saveRequestPending') : $i18n.t('request.saveRequest')}
               </button>
-              <button class="action-button" disabled={invokePending || reflectionPending || protoPending} on:click={runUnaryInvoke}>
+              <button class="action-button" disabled={invokePending || reflectionPending || protoPending || hasActiveLiveStream} on:click={runUnaryInvoke}>
                 {invokePending ? $i18n.t('request.invokePending') : $i18n.t('request.invoke')}
               </button>
             {:else if selectedMethod.rpcType === 'server_stream'}
@@ -1388,7 +1846,56 @@
                 disabled={streamPending || reflectionPending || protoPending || (streamStartResult !== null && !isTerminalState(streamState))}
                 on:click={runClientStreamInvoke}
               >
-                {streamPending ? $i18n.t('request.startClientStreamPending') : $i18n.t('request.startClientStream')}
+                {streamPending
+                  ? $i18n.t('request.startClientStreamPending')
+                  : clientStreamMode === 'interactive'
+                    ? $i18n.t('request.startInteractiveClientStream')
+                    : $i18n.t('request.startClientStream')}
+              </button>
+              {#if clientStreamMode === 'interactive'}
+                <button
+                  class="ghost-button"
+                  disabled={sendPending || !streamStartResult || streamState !== 'open'}
+                  on:click={runClientStreamSend}
+                >
+                  {sendPending ? $i18n.t('request.sendClientMessagePending') : $i18n.t('request.sendClientMessage')}
+                </button>
+                <button
+                  class="ghost-button"
+                  disabled={halfClosePending || !streamStartResult || streamState !== 'open'}
+                  on:click={runClientStreamHalfClose}
+                >
+                  {halfClosePending ? $i18n.t('request.halfClosePending') : $i18n.t('request.halfClose')}
+                </button>
+              {/if}
+              <button
+                class="ghost-button"
+                disabled={cancelPending || !streamStartResult || isTerminalState(streamState)}
+                on:click={runStreamCancel}
+              >
+                {cancelPending ? $i18n.t('request.cancelStreamPending') : $i18n.t('request.cancelStream')}
+              </button>
+            {:else if selectedMethod.rpcType === 'bidi_stream'}
+              <button
+                class="action-button"
+                disabled={streamPending || reflectionPending || protoPending || (streamStartResult !== null && !isTerminalState(streamState))}
+                on:click={runBidiStreamInvoke}
+              >
+                {streamPending ? $i18n.t('request.startBidiStreamPending') : $i18n.t('request.startBidiStream')}
+              </button>
+              <button
+                class="ghost-button"
+                disabled={sendPending || !streamStartResult || streamState !== 'open'}
+                on:click={runBidiStreamSend}
+              >
+                {sendPending ? $i18n.t('request.sendBidiMessagePending') : $i18n.t('request.sendBidiMessage')}
+              </button>
+              <button
+                class="ghost-button"
+                disabled={halfClosePending || !streamStartResult || streamState !== 'open'}
+                on:click={runBidiStreamHalfClose}
+              >
+                {halfClosePending ? $i18n.t('request.halfClosePending') : $i18n.t('request.halfClose')}
               </button>
               <button
                 class="ghost-button"
@@ -1415,10 +1922,32 @@
         <div class="pill-row">
           <span class="pill" class:pill--accent={streamState === 'open'}>{translateStreamStateLabel($i18n.language, streamState)}</span>
           <span class="pill">{streamStartResult.callId}</span>
+          <span class="pill">{$i18n.t('timeline.eventsCount', { count: streamEvents.length })}</span>
+          <span class="pill">{$i18n.t('timeline.windowCount', { count: timelineWindow.renderedCount, total: filteredStreamEvents.length })}</span>
+          {#if hasTruncatedCondition}
+            <span class="pill pill--warning">{$i18n.t('stream.condition.truncated')}</span>
+          {/if}
           {#if streamCompleted}
             <span class:badge--warning={streamCompleted.status.code !== 'OK'} class="badge">{streamCompleted.status.code}</span>
           {/if}
+          {#if hasActiveLiveStream}
+            <button class="ghost-button" disabled={cancelPending} on:click={runStreamCancel}>
+              {cancelPending ? $i18n.t('request.cancelStreamPending') : $i18n.t('request.cancelStream')}
+            </button>
+          {/if}
         </div>
+
+        {#if hasActiveLiveStream}
+          <div class="info-banner">{$i18n.t('stream.contextLockedInfo', { callId: streamStartResult.callId })}</div>
+        {/if}
+
+        {#if hasTruncatedCondition}
+          <div class="empty-state empty-state--warning">{$i18n.t('stream.truncatedWarning')}</div>
+        {/if}
+
+        {#if streamState === 'half_closed_local' && !streamCompleted}
+          <div class="subtle">{$i18n.t('stream.halfClosedLocalReceiving')}</div>
+        {/if}
 
         {#if streamError}
           <article class="diagnostic-item">
@@ -1430,20 +1959,60 @@
           </article>
         {/if}
 
-        <div class="stream-timeline">
+        <div class="timeline-toolbar">
+          <label class="field timeline-filter">
+            <span>{$i18n.t('timeline.direction')}</span>
+            <select
+              value={timelineDirectionFilter}
+              on:change={(event) => updateTimelineDirectionFilter((event.currentTarget as HTMLSelectElement).value as TimelineDirectionFilter)}
+            >
+              <option value="all">{$i18n.t('timeline.allDirections')}</option>
+              <option value="sent">{$i18n.t('timeline.sent')}</option>
+              <option value="received">{$i18n.t('timeline.received')}</option>
+            </select>
+          </label>
+
+          <label class="field timeline-filter">
+            <span>{$i18n.t('timeline.kind')}</span>
+            <select
+              value={timelineKindFilter}
+              on:change={(event) => updateTimelineKindFilter((event.currentTarget as HTMLSelectElement).value)}
+            >
+              <option value="all">{$i18n.t('timeline.allKinds')}</option>
+              {#each timelineKindOptions as kind}
+                <option value={kind}>{kind}</option>
+              {/each}
+            </select>
+          </label>
+
+          <div class="pill-row timeline-actions">
+            <button class="ghost-button" disabled={!firstTimelineError} on:click={() => void jumpToFirstTimelineError()}>
+              {$i18n.t('timeline.jumpToError')}
+            </button>
+            <button class="ghost-button" disabled={timelineAtLiveTail} on:click={() => void scrollTimelineToTail()}>
+              {$i18n.t('timeline.jumpToLive')}
+            </button>
+          </div>
+        </div>
+
+        <div class="stream-timeline stream-timeline--windowed" bind:this={timelineViewport} on:scroll={updateTimelineViewportMetrics}>
           {#if streamEvents.length === 0}
             <div class="empty-state">{$i18n.t('stream.emptyTimeline')}</div>
+          {:else if filteredStreamEvents.length === 0}
+            <div class="empty-state">{$i18n.t('stream.emptyFilteredTimeline')}</div>
           {:else}
-            {#each streamEvents as event}
-              <article class="history-event">
+            <div style={`height: ${timelineWindow.beforeHeightPx}px;`} aria-hidden="true"></div>
+            {#each timelineWindow.items as event (event.sessionId + ':' + event.seq)}
+              <article class="history-event history-event--timeline">
                 <div class="diagnostic-item__head">
                   <strong>{event.kind}</strong>
                   <span class="diagnostic-item__meta">#{event.seq} {event.direction}</span>
                 </div>
                 <span>{formatTimestamp(event.ts)}</span>
-                <pre class="code-block">{formatStreamEventPreview(event)}</pre>
+                <pre class="code-block code-block--timeline">{formatStreamEventPreview(event)}</pre>
               </article>
             {/each}
+            <div style={`height: ${timelineWindow.afterHeightPx}px;`} aria-hidden="true"></div>
           {/if}
         </div>
       {:else if !invokeResult}

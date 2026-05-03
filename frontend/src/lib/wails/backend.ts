@@ -16,6 +16,12 @@ import type {
   CallStartStreamInput,
   CallStartStreamResponse,
   CallStartStreamResult,
+  CallSendMessageInput,
+  CallSendMessageResponse,
+  CallSendMessageResult,
+  CallHalfCloseInput,
+  CallHalfCloseResponse,
+  CallHalfCloseResult,
   CallCancelInput,
   CallCancelResponse,
   CallCancelResult,
@@ -40,7 +46,9 @@ import type {
 } from '../contracts'
 import {
   CallCancel,
+  CallHalfClose,
   CallInvokeUnary,
+  CallSendMessage,
   CallStartStream,
   CatalogLoadFromReflection,
   CatalogLoadFromProtoSources,
@@ -162,6 +170,16 @@ export async function invokeUnary(input: CallInvokeUnaryInput): Promise<CallInvo
 export async function startStream(input: CallStartStreamInput): Promise<CallStartStreamResult> {
   const response = (await CallStartStream(input as Parameters<typeof CallStartStream>[0])) as CallStartStreamResponse
   return unwrapResponse(response) as CallStartStreamResult
+}
+
+export async function sendStreamMessage(input: CallSendMessageInput): Promise<CallSendMessageResult> {
+  const response = (await CallSendMessage(input as Parameters<typeof CallSendMessage>[0])) as CallSendMessageResponse
+  return unwrapResponse(response) as CallSendMessageResult
+}
+
+export async function halfCloseStream(input: CallHalfCloseInput): Promise<CallHalfCloseResult> {
+  const response = (await CallHalfClose(input as Parameters<typeof CallHalfClose>[0])) as CallHalfCloseResponse
+  return unwrapResponse(response) as CallHalfCloseResult
 }
 
 export async function cancelStream(input: CallCancelInput): Promise<CallCancelResult> {

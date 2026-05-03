@@ -67,6 +67,30 @@ type ClientStreamInvokeRequest struct {
 	OnHalfClose    func(time.Time)
 }
 
+type ClientStreamStartRequest struct {
+	Method     contracts.CatalogMethod
+	Descriptor protoreflect.MethodDescriptor
+	Metadata   map[string]string
+}
+
+type ClientStreamStartResult struct {
+	Stream grpc.ClientStream
+}
+
+type ClientStreamSendRequest struct {
+	Method     contracts.CatalogMethod
+	Descriptor protoreflect.MethodDescriptor
+	Stream     ClientStreamStartResult
+	Body       any
+	Index      int
+}
+
+type ClientStreamReceiveRequest struct {
+	Method     contracts.CatalogMethod
+	Descriptor protoreflect.MethodDescriptor
+	Stream     ClientStreamStartResult
+}
+
 type ClientStreamSentMessage struct {
 	Body      any
 	Index     int
@@ -83,6 +107,92 @@ type ClientStreamInvokeResult struct {
 	ResponseCount int
 	FinishedAt    time.Time
 	Duration      time.Duration
+}
+
+func (r *grpcRuntime) StartClientStream(ctx context.Context, conn GRPCClientConn, request ClientStreamStartRequest) (ClientStreamStartResult, *endpointDiagnostic) {
+	callCtx := ctx
+	if len(request.Metadata) > 0 {
+		callCtx = metadata.NewOutgoingContext(callCtx, metadata.New(request.Metadata))
+	}
+
+	stream, err := conn.NewStream(
+		callCtx,
+		&grpc.StreamDesc{
+			ClientStreams: true,
+			ServerStreams: request.Method.RPCType == contracts.RPCTypeBidiStream,
+		},
+		grpcMethodPath(request.Descriptor),
+	)
+	if err != nil {
+		return ClientStreamStartResult{}, classifyClientStreamError(request.Method, err)
+	}
+
+	return ClientStreamStartResult{Stream: stream}, nil
+}
+
+func (r *grpcRuntime) SendClientStreamMessage(request ClientStreamSendRequest) (ClientStreamSentMessage, *endpointDiagnostic) {
+	requestMessage, requestDiagnostic := buildUnaryRequestMessage(request.Descriptor.Input(), request.Body)
+	if requestDiagnostic != nil {
+		return ClientStreamSentMessage{}, requestDiagnostic
+	}
+
+	if err := request.Stream.Stream.SendMsg(requestMessage); err != nil {
+		return ClientStreamSentMessage{}, classifyClientStreamError(request.Method, err)
+	}
+
+	return ClientStreamSentMessage{
+		Body:      request.Body,
+		Index:     request.Index,
+		SizeBytes: measureJSONSize(request.Body),
+		SentAt:    time.Now().UTC(),
+	}, nil
+}
+
+func (r *grpcRuntime) CloseClientStreamSend(method contracts.CatalogMethod, stream ClientStreamStartResult) *endpointDiagnostic {
+	if err := stream.Stream.CloseSend(); err != nil {
+		return classifyClientStreamError(method, err)
+	}
+
+	return nil
+}
+
+func (r *grpcRuntime) ReceiveClientStreamResponse(request ClientStreamReceiveRequest) (ClientStreamInvokeResult, *endpointDiagnostic) {
+	startedAt := time.Now()
+
+	headers, headerErr := request.Stream.Stream.Header()
+	clonedHeaders := cloneMetadataValues(headers)
+	if headerErr != nil {
+		result := clientStreamErrorResult(request.Stream.Stream, clonedHeaders, headerErr)
+		result.Duration = time.Since(startedAt)
+		return result, classifyClientStreamError(request.Method, headerErr)
+	}
+
+	responseMessage := dynamicpb.NewMessage(request.Descriptor.Output())
+	if err := request.Stream.Stream.RecvMsg(responseMessage); err != nil {
+		result := clientStreamErrorResult(request.Stream.Stream, clonedHeaders, err)
+		result.Duration = time.Since(startedAt)
+		return result, classifyClientStreamError(request.Method, err)
+	}
+
+	responseBody, responseDiagnostic := marshalMessageJSONValue(responseMessage)
+	if responseDiagnostic != nil {
+		return ClientStreamInvokeResult{
+			Headers:    clonedHeaders,
+			Trailers:   cloneMetadataValues(request.Stream.Stream.Trailer()),
+			FinishedAt: time.Now().UTC(),
+			Duration:   time.Since(startedAt),
+		}, responseDiagnostic
+	}
+
+	return ClientStreamInvokeResult{
+		ResponseBody:  responseBody,
+		Headers:       clonedHeaders,
+		Trailers:      cloneMetadataValues(request.Stream.Stream.Trailer()),
+		Status:        contracts.StreamStatus{Code: codes.OK.String()},
+		ResponseCount: 1,
+		FinishedAt:    time.Now().UTC(),
+		Duration:      time.Since(startedAt),
+	}, nil
 }
 
 func (r *grpcRuntime) StartServerStream(ctx context.Context, conn GRPCClientConn, request ServerStreamStartRequest) (ServerStreamStartResult, *endpointDiagnostic) {

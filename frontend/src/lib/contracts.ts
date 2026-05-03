@@ -549,6 +549,43 @@ export interface CallStartStreamResponse {
   error?: ErrorEnvelope
 }
 
+export interface CallSendMessageInput {
+  sessionId: string
+  message: StreamMessage
+}
+
+export interface CallSendMessageResult {
+  callId: string
+  sessionId: string
+  state: StreamState
+  messageIndex: number
+  seq: number
+  sentAt: string
+}
+
+export interface CallSendMessageResponse {
+  ok: boolean
+  data?: CallSendMessageResult
+  error?: ErrorEnvelope
+}
+
+export interface CallHalfCloseInput {
+  sessionId: string
+}
+
+export interface CallHalfCloseResult {
+  callId: string
+  sessionId: string
+  state: StreamState
+  requestedAt: string
+}
+
+export interface CallHalfCloseResponse {
+  ok: boolean
+  data?: CallHalfCloseResult
+  error?: ErrorEnvelope
+}
+
 export interface CallCancelInput {
   sessionId: string
 }
