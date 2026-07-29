@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="512" y1="90" x2="512" y2="930" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#172b66"/>
+      <stop offset="0.48" stop-color="#0e2360"/>
+      <stop offset="1" stop-color="#173df0"/>
+    </linearGradient>
+
+    <linearGradient id="edge" x1="240" y1="120" x2="790" y2="930" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6d8cff" stop-opacity=".72"/>
+      <stop offset=".42" stop-color="#3358d7" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#0f2aa3" stop-opacity=".72"/>
+    </linearGradient>
+
+    <linearGradient id="light" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".55" stop-color="#edf4ff"/>
+      <stop offset="1" stop-color="#a9c8ff"/>
+    </linearGradient>
+
+    <linearGradient id="slot" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7fbff"/>
+      <stop offset="1" stop-color="#9ec3ff"/>
+    </linearGradient>
+
+    <radialGradient id="hubFill" cx="50%" cy="42%" r="70%">
+      <stop offset="0" stop-color="#183fce"/>
+      <stop offset=".64" stop-color="#102c86"/>
+      <stop offset="1" stop-color="#0a1e61"/>
+    </radialGradient>
+
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#020714" flood-opacity=".65"/>
+    </filter>
+
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feFlood flood-color="#6ea6ff" flood-opacity=".55" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glowColor"/>
+      <feMerge>
+        <feMergeNode in="glowColor"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Transparent canvas; only the rounded app tile is visible -->
+  <g filter="url(#shadow)">
+    <rect x="94" y="88" width="836" height="836" rx="208" fill="url(#bg)"/>
+    <rect x="96.5" y="90.5" width="831" height="831" rx="205.5"
+          fill="none" stroke="url(#edge)" stroke-width="5"/>
+  </g>
+
+  <!-- Main vertical connection -->
+  <g filter="url(#softGlow)">
+    <rect x="501" y="347" width="22" height="87" rx="11" fill="url(#light)" opacity=".86"/>
+    <rect x="501" y="590" width="22" height="70" rx="11" fill="url(#light)" opacity=".86"/>
+  </g>
+
+  <!-- Top service/server -->
+  <g filter="url(#glow)">
+    <rect x="321" y="212" width="382" height="142" rx="42"
+          fill="none" stroke="url(#light)" stroke-width="26"/>
+    <circle cx="390" cy="283" r="15" fill="url(#light)"/>
+    <circle cx="441" cy="283" r="15" fill="url(#light)"/>
+    <rect x="507" y="271" width="121" height="23" rx="11.5" fill="url(#slot)"/>
+  </g>
+
+  <!-- Bottom service/server -->
+  <g filter="url(#glow)">
+    <rect x="321" y="660" width="382" height="142" rx="42"
+          fill="none" stroke="url(#light)" stroke-width="26"/>
+    <circle cx="390" cy="731" r="15" fill="url(#light)"/>
+    <circle cx="441" cy="731" r="15" fill="url(#light)"/>
+    <rect x="507" y="719" width="121" height="23" rx="11.5" fill="url(#slot)"/>
+  </g>
+
+  <!-- Upward request flow -->
+  <g fill="none" stroke="url(#light)" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <path d="M360 612 V549" stroke-width="18"/>
+    <circle cx="360" cy="525" r="8" fill="#bfe0ff" stroke="none"/>
+    <circle cx="360" cy="495" r="8" fill="#bfe0ff" stroke="none"/>
+    <path d="M360 457 V391" stroke-width="18"/>
+    <path d="M330 420 L360 390 L390 420" stroke-width="18"/>
+  </g>
+
+  <!-- Downward response flow -->
+  <g fill="none" stroke="url(#light)" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <path d="M664 392 V457" stroke-width="18"/>
+    <circle cx="664" cy="494" r="8" fill="#bfe0ff" stroke="none"/>
+    <circle cx="664" cy="524" r="8" fill="#bfe0ff" stroke="none"/>
+    <path d="M664 549 V612" stroke-width="18"/>
+    <path d="M634 583 L664 613 L694 583" stroke-width="18"/>
+  </g>
+
+  <!-- Monitoring hub -->
+  <g filter="url(#glow)">
+    <circle cx="512" cy="512" r="98" fill="url(#hubFill)" stroke="url(#light)" stroke-width="22"/>
+    <path d="M449 513 H480 L495 535 L517 461 L540 556 L558 513 H579"
+          fill="none" stroke="url(#light)" stroke-width="18"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
