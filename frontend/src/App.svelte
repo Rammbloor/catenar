@@ -947,8 +947,17 @@
   class:monitor-shell--sidebar-hidden={!leftSidebarVisible}
   class="monitor-shell"
   on:dblclick={handleShellDoubleClick}
-  role="application"
+  aria-label={$i18n.t('app.title')}
+  role="region"
 >
+  {@html `<!--
+    THESIS: Catenar makes fast gRPC work legible at a glance; it is a focused desktop instrument, not a landing page or generic dashboard.
+    OWN-WORLD: smoked graphite glass in dark mode and pearl-satin glass in light mode; restrained ion-lilac signals establish selection and speed, with muted coral reserved for failure states. Blue and green chrome are intentionally absent.
+    STORY: connect a service, load its contract, compose a call and read its outcome without losing operational context.
+    FIRST VIEWPORT: a left connection rail anchors the session; the client workbench or trace starts immediately beside it, with first-run guidance occupying the otherwise empty work surface.
+    FORM: Graphite Flux Glass, candidate 6, seed 02e5cd40.
+    FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->`}
   <header class="monitor-header">
     <div class="monitor-brand">
       <img class="monitor-brand__mark" src="/app-icon.png" alt="" aria-hidden="true" />
@@ -977,6 +986,7 @@
     rightPanelVisible={rightPanelVisible}
     on:deleteconnection={handleConnectionDeleted}
     on:editconnection={(event) => openConnectionEditor(event.detail)}
+    on:newconnection={() => openModal('new-connection')}
     on:renameconnection={handleConnectionRenamed}
     on:reconnectconnection={handleConnectionReconnect}
     on:selectconnection={(event) => (selectedConnectionId = event.detail)}

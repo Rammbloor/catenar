@@ -81,6 +81,7 @@
     deleteconnection: string
     editconnection: string
     reconnectconnection: string
+    newconnection: void
     renameconnection: {
       connectionId: string
       name: string
@@ -162,7 +163,8 @@
   let trafficSearchQuery = ''
   let trafficMethodFilter = 'all'
   let trafficStatusFilter = 'all'
-  let activeMonitorMode: MonitorMode = 'traffic'
+  let activeMonitorMode: MonitorMode = 'client'
+  let mobileConnectionDrawerOpen = false
   let lastObservedStreamCompletedCallId = ''
 
   onDestroy(() => {
@@ -198,6 +200,13 @@
   $: selectedMethod = selectedConnection
     ? findMethod(selectedConnection.services, selectedConnection.selectedMethodFullName)
     : undefined
+  // Saved request state is scoped to one endpoint. A connection switch must
+  // never leave the previous request visibly applied or put the composer into
+  // an accidental "update saved request" mode.
+  $: if (appliedSavedRequest && appliedSavedRequest.endpointRef !== selectedConnection?.id) {
+    appliedSavedRequest = null
+    editingSavedRequest = null
+  }
   $: detailConnection = detailConnectionId
     ? connections.find((connection) => connection.id === detailConnectionId)
     : undefined
@@ -288,6 +297,10 @@
     return `connection-status connection-status--${status}`
   }
 
+  function connectionStatusLabel(status: MonitorConnection['status']): string {
+    return $i18n.t(`connection.status.${status}`)
+  }
+
   function isLiveStreamState(state: StreamState): boolean {
     return state === 'connecting' || state === 'open' || state === 'half_closed_local' || state === 'half_closed_remote'
   }
@@ -299,6 +312,7 @@
   function selectConnection(connectionId: string): void {
     dispatch('selectconnection', connectionId)
     activeConnectionMenuId = ''
+    mobileConnectionDrawerOpen = false
   }
 
   function selectAdjacentConnection(direction: 1 | -1): void {
@@ -1724,6 +1738,7 @@
   {#if leftSidebarVisible}
   <aside class="connection-sidebar">
     <div class="connection-sidebar__head">
+      <span class="connection-sidebar__product">Catenar</span>
       <h2>{$i18n.t('connections.title')}</h2>
       <span>{$i18n.t('connections.count', { count: connections.length })}</span>
     </div>
@@ -1749,7 +1764,7 @@
           <div class:connection-item--active={selectedConnection?.id === connection.id} class="connection-item">
             <span class={statusClass(connection.status)}></span>
             <div
-              aria-label={connection.name}
+              aria-label={`${connection.name} · ${connectionStatusLabel(connection.status)}`}
               class="connection-item__main"
               on:click={() => selectConnection(connection.id)}
               on:keydown={(event) => handleConnectionKeyboard(event, connection.id)}
@@ -1772,6 +1787,7 @@
                 }}>{connection.name}</strong>
               {/if}
               <span>{connection.endpoint}</span>
+              <small class="connection-item__status">{connectionStatusLabel(connection.status)}</small>
               <div class="connection-sparkline" aria-label={`${$i18n.t('monitor.avgResponse')}: ${connectionLatency(connection.id)}`}>
                 <svg aria-hidden="true" viewBox="0 0 100 32" preserveAspectRatio="none">
                   <polyline points={connectionSparklinePoints(connection.id)}></polyline>
@@ -1811,6 +1827,10 @@
         <div class="empty-state empty-state--sidebar">
           <strong>{$i18n.t('connections.emptyTitle')}</strong>
           <span>{$i18n.t('connections.emptyCopy')}</span>
+          <button class="onboarding-rail__action" on:click={() => dispatch('newconnection')} type="button">
+            {$i18n.t('onboarding.connectionCta')}
+            <span aria-hidden="true">→</span>
+          </button>
         </div>
       {/if}
     </div>
@@ -1842,6 +1862,53 @@
         {$i18n.t('monitor.modeTraffic')}
       </button>
     </nav>
+
+    <div class="mobile-connection-bar">
+      <button
+        aria-expanded={mobileConnectionDrawerOpen}
+        class="mobile-connection-bar__trigger"
+        on:click={() => (mobileConnectionDrawerOpen = !mobileConnectionDrawerOpen)}
+        type="button"
+      >
+        <span>{$i18n.t('connections.mobileManage', { count: connections.length })}</span>
+        <span aria-hidden="true">{mobileConnectionDrawerOpen ? '−' : '+'}</span>
+      </button>
+      <button class="primary-command mobile-connection-bar__new" on:click={() => dispatch('newconnection')} type="button">
+        {$i18n.t('connection.new')}
+      </button>
+    </div>
+
+    {#if mobileConnectionDrawerOpen}
+      <section aria-label={$i18n.t('connections.title')} class="mobile-connection-drawer">
+        <div class="mobile-connection-drawer__head">
+          <strong>{$i18n.t('connections.title')}</strong>
+          <button aria-label={$i18n.t('common.close')} on:click={() => (mobileConnectionDrawerOpen = false)} type="button">×</button>
+        </div>
+        {#if connections.length > 0}
+          <div class="mobile-connection-drawer__list">
+            {#each connections as connection}
+              <article class:mobile-connection-drawer__item--active={selectedConnection?.id === connection.id} class="mobile-connection-drawer__item">
+                <button on:click={() => selectConnection(connection.id)} type="button">
+                  <strong>{connection.name}</strong>
+                  <span>{connection.endpoint}</span>
+                  <small>{connectionStatusLabel(connection.status)}</small>
+                </button>
+                <div>
+                  <button aria-label={$i18n.t('connection.edit')} on:click={() => dispatch('editconnection', connection.id)} type="button">
+                    {$i18n.t('connection.edit')}
+                  </button>
+                  <button aria-label={$i18n.t('connection.delete')} class="mobile-connection-drawer__delete" on:click={() => dispatch('deleteconnection', connection.id)} type="button">
+                    {$i18n.t('connection.delete')}
+                  </button>
+                </div>
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <div class="mobile-connection-drawer__empty">{$i18n.t('onboarding.connectionHint')}</div>
+        {/if}
+      </section>
+    {/if}
 
     {#if activeMonitorMode === 'traffic'}
     <div class="metric-row">
@@ -1878,7 +1945,6 @@
         <section class="traffic-view">
           <div class="traffic-toolbar">
             <div>
-              <span class="eyebrow">{$i18n.t('monitor.modeTraffic')}</span>
               <h2>{$i18n.t('monitor.requestLog')}</h2>
               <span class="traffic-toolbar__scope">
                 {$i18n.t('history.connectionScope', { connection: selectedConnection?.name ?? $i18n.t('connections.emptyTitle') })}
@@ -1917,9 +1983,10 @@
             <section class="request-log">
               <div class="traffic-metrics-line">
                 {#if selectedConnection?.status === 'online'}
-                  <span class="traffic-live-dot"></span>
+                  <span aria-hidden="true" class="traffic-live-dot traffic-live-dot--active"></span>
                   <strong>{$i18n.t('monitor.live')}</strong>
                 {:else}
+                  <span aria-hidden="true" class="traffic-live-dot traffic-live-dot--inactive"></span>
                   <strong class="traffic-metrics-line__offline">{$i18n.t('monitor.notConnected')}</strong>
                 {/if}
                 <span>{completedCalls} {$i18n.t('monitor.requests')}</span>
@@ -1967,12 +2034,10 @@
                           {:else}
                             <header class="traffic-request-detail__head">
                               <div>
-                                <span class="eyebrow">{formatRpcType(historyDetail.summary.rpcType)}</span>
                                 <h3>{methodDisplayName(historyDetail.summary.method)}</h3>
                               </div>
                               <div class="traffic-request-detail__meta">
                                 <span class:response-status-badge--error={historyDetail.status.code !== 'OK'} class="response-status-badge">{historyDetail.status.code}</span>
-                                <span>{formatDuration(historyDetail.summary.durationMs)}</span>
                                 <span>{formatTime(historyDetail.summary.finishedAt ?? historyDetail.summary.startedAt)}</span>
                               </div>
                             </header>
@@ -1998,10 +2063,8 @@
                                 <strong>{formatDuration(historyDetail.summary.durationMs)}</strong>
                               </div>
                               <div class="traffic-timeline">
-                                <div>
-                                  <span>{$i18n.t('timeline.callDuration')}</span>
+                                <div aria-label={`${$i18n.t('history.timeline')}: ${formatDuration(historyDetail.summary.durationMs)}`}>
                                   <i><b style={`width: ${timelineVisualWidth(historyDetail.summary.durationMs)}%`}></b></i>
-                                  <strong>{formatDuration(historyDetail.summary.durationMs)}</strong>
                                 </div>
                               </div>
                             </section>
@@ -2016,8 +2079,25 @@
                     </div>
                   {:else}
                     <div class="empty-state request-table__empty">
-                      <strong>{historyLoadFailed ? $i18n.t('history.loadFailed') : $i18n.t('history.emptyTitle')}</strong>
-                      <span>{historyLoadFailed ? $i18n.t('history.loadFailedCopy') : $i18n.t('history.emptyCopy')}</span>
+                      {#if connections.length === 0}
+                        <div class="onboarding-empty-state">
+                          <span aria-hidden="true" class="onboarding-empty-state__signal"></span>
+                          <h3>{$i18n.t('onboarding.trafficTitle')}</h3>
+                          <p>{$i18n.t('onboarding.trafficCopy')}</p>
+                          <ol class="onboarding-empty-state__steps">
+                            <li>{$i18n.t('onboarding.connectionStepConnect')}</li>
+                            <li>{$i18n.t('onboarding.connectionStepInspect')}</li>
+                            <li>{$i18n.t('onboarding.connectionStepInvoke')}</li>
+                          </ol>
+                          <button class="primary-command onboarding-empty-state__action" on:click={() => dispatch('newconnection')} type="button">
+                            {$i18n.t('onboarding.connectionCta')}
+                            <span aria-hidden="true">→</span>
+                          </button>
+                        </div>
+                      {:else}
+                        <strong>{historyLoadFailed ? $i18n.t('history.loadFailed') : $i18n.t('history.emptyTitle')}</strong>
+                        <span>{historyLoadFailed ? $i18n.t('history.loadFailedCopy') : $i18n.t('history.emptyCopy')}</span>
+                      {/if}
                     </div>
                   {/if}
                 </div>
@@ -2028,6 +2108,36 @@
         {/if}
 
         {#if activeMonitorMode === 'client'}
+        {#if connections.length === 0}
+        <section class="client-onboarding" aria-labelledby="client-onboarding-title">
+          <div class="client-onboarding__copy">
+            <span class="client-onboarding__index" aria-hidden="true">01</span>
+            <h2 id="client-onboarding-title">{$i18n.t('onboarding.clientTitle')}</h2>
+            <p>{$i18n.t('onboarding.clientCopy')}</p>
+            <button class="primary-command client-onboarding__action" on:click={() => dispatch('newconnection')} type="button">
+              {$i18n.t('onboarding.connectionCta')}
+              <span aria-hidden="true">→</span>
+            </button>
+          </div>
+          <ol class="client-onboarding__sequence">
+            <li>
+              <span>01</span>
+              <strong>{$i18n.t('onboarding.connectionStepConnect')}</strong>
+              <p>{$i18n.t('onboarding.connectionHint')}</p>
+            </li>
+            <li>
+              <span>02</span>
+              <strong>{$i18n.t('onboarding.connectionStepInspect')}</strong>
+              <p>{$i18n.t('onboarding.connectionStepInspectCopy')}</p>
+            </li>
+            <li>
+              <span>03</span>
+              <strong>{$i18n.t('onboarding.connectionStepInvoke')}</strong>
+              <p>{$i18n.t('onboarding.connectionStepInvokeCopy')}</p>
+            </li>
+          </ol>
+        </section>
+        {:else}
         <section class="unary-workbench">
           <div class="client-command-bar">
             <h2>{$i18n.t('monitor.modeClient')}</h2>
@@ -2283,6 +2393,11 @@
                     <div class="empty-state composer-panel__empty">
                       <strong>{$i18n.t('request.emptyTitle')}</strong>
                       <span>{$i18n.t('request.empty')}</span>
+                      {#if connections.length === 0}
+                        <button class="secondary-command onboarding-inline-action" on:click={() => dispatch('newconnection')} type="button">
+                          {$i18n.t('onboarding.connectionCta')}
+                        </button>
+                      {/if}
                     </div>
                   {:else}
                     {#if activeComposerTab === 'schema'}
@@ -2603,16 +2718,19 @@
                 <section class="client-support-card">
                   <div class="client-support-card__head">
                     <h3>{$i18n.t('history.timeline')}</h3>
-                    {#if responseStatus}<span class="response-status-badge">{formatDuration(invokeResult?.durationMs ?? historyDetail?.summary.durationMs)}</span>{/if}
+                    {#if invokeResult?.durationMs !== undefined || historyDetail?.summary.durationMs !== undefined}
+                      <span class="response-status-badge">{formatDuration(invokeResult?.durationMs ?? historyDetail?.summary.durationMs)}</span>
+                    {/if}
                   </div>
                   <div class="client-timeline">
-                    <div><span>{$i18n.t('timeline.callDuration')}</span><i><b style={`width: ${timelineVisualWidth(invokeResult?.durationMs ?? historyDetail?.summary.durationMs)}%`}></b></i><strong>{responseStatus ? formatDuration(invokeResult?.durationMs ?? historyDetail?.summary.durationMs) : '—'}</strong></div>
+                    <div aria-label={`${$i18n.t('history.timeline')}: ${responseStatus ? formatDuration(invokeResult?.durationMs ?? historyDetail?.summary.durationMs) : '—'}`}><i><b style={`width: ${timelineVisualWidth(invokeResult?.durationMs ?? historyDetail?.summary.durationMs)}%`}></b></i></div>
                   </div>
                 </section>
               </div>
             </div>
           </div>
         </section>
+        {/if}
         {/if}
       </div>
     </div>
@@ -2632,7 +2750,6 @@
   <div aria-modal="true" aria-labelledby="client-method-modal-title" class="client-method-modal" role="dialog">
     <header class="client-method-modal__head">
       <div>
-        <span class="eyebrow">{$i18n.t('monitor.modeClient')}</span>
         <h2 id="client-method-modal-title">{$i18n.t('method.method')}</h2>
       </div>
       <button
@@ -2690,7 +2807,6 @@
   <div aria-modal="true" aria-labelledby="client-saved-requests-modal-title" class="client-saved-requests-modal" role="dialog">
     <header class="client-method-modal__head">
       <div>
-        <span class="eyebrow">{$i18n.t('monitor.modeClient')}</span>
         <h2 id="client-saved-requests-modal-title">{$i18n.t('request.savedRequests')}</h2>
       </div>
       <button aria-label={$i18n.t('common.close')} class="modal-close" on:click={closeClientSavedRequestsModal} type="button">×</button>
@@ -2847,7 +2963,6 @@
   <div aria-modal="true" class="save-request-modal save-request-modal--saved-request-rename" role="dialog" aria-labelledby="rename-saved-request-title">
     <div class="save-request-modal__head">
       <div>
-        <span class="eyebrow">{$i18n.t('request.renameSavedRequest')}</span>
         <h2 id="rename-saved-request-title">{$i18n.t('request.savedRequestRenameTitle')}</h2>
       </div>
       <button aria-label={$i18n.t('common.close')} class="modal-close" on:click={closeSavedRequestRenameDialog} type="button">×</button>
@@ -2897,7 +3012,6 @@
   <div aria-modal="true" class="save-request-modal" role="dialog" aria-labelledby="save-request-title">
     <div class="save-request-modal__head">
       <div>
-        <span class="eyebrow">{$i18n.t('request.saveRequest')}</span>
         <h2 id="save-request-title">{$i18n.t('request.saveRequestDialogTitle')}</h2>
       </div>
       <button aria-label={$i18n.t('common.close')} class="modal-close" on:click={closeSaveRequestDialog} type="button">×</button>
