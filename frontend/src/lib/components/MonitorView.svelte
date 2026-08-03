@@ -35,6 +35,13 @@
     type MetadataValidationError,
   } from '../unary-flow'
   import {
+    appliedSavedRequestForEndpoint,
+    applySavedRequestToEndpoint,
+    clearAppliedSavedRequest,
+    removeAppliedSavedRequest,
+    replaceAppliedSavedRequest,
+  } from '../saved-request-context'
+  import {
     BackendResponseError,
     cancelStream,
     deleteSavedRequest,
@@ -123,6 +130,7 @@
   let savedRequestRenameInput: HTMLInputElement | null = null
   let editingSavedRequest: WorkspaceSavedRequestSummary | null = null
   let appliedSavedRequest: WorkspaceSavedRequestSummary | null = null
+  let appliedSavedRequests: Record<string, WorkspaceSavedRequestSummary> = {}
   let pendingRequestSave: { body: JsonValue; metadata: Record<string, string> } | null = null
   let requestDeletePendingId = ''
   let activeConnectionMenuId = ''
@@ -200,11 +208,11 @@
   $: selectedMethod = selectedConnection
     ? findMethod(selectedConnection.services, selectedConnection.selectedMethodFullName)
     : undefined
-  // Saved request state is scoped to one endpoint. A connection switch must
-  // never leave the previous request visibly applied or put the composer into
-  // an accidental "update saved request" mode.
-  $: if (appliedSavedRequest && appliedSavedRequest.endpointRef !== selectedConnection?.id) {
-    appliedSavedRequest = null
+  // A saved request belongs to one endpoint. Its indicator is hidden on every
+  // other connection, but returns with the endpoint's own draft when users
+  // come back. Editing remains limited to the currently selected endpoint.
+  $: appliedSavedRequest = appliedSavedRequestForEndpoint(appliedSavedRequests, selectedConnection?.id)
+  $: if (editingSavedRequest && editingSavedRequest.endpointRef !== selectedConnection?.id) {
     editingSavedRequest = null
   }
   $: detailConnection = detailConnectionId
@@ -846,7 +854,7 @@
       historyDetail = null
       selectedHistoryCallId = ''
       editingSavedRequest = summary
-      appliedSavedRequest = summary
+      appliedSavedRequests = applySavedRequestToEndpoint(appliedSavedRequests, summary)
       saveInfoMessage = $i18n.t('request.savedRequestApplied', {
         name: savedRequestMethodName(summary),
       })
@@ -867,9 +875,7 @@
       if (editingSavedRequest?.id === summary.id) {
         editingSavedRequest = null
       }
-      if (appliedSavedRequest?.id === summary.id) {
-        appliedSavedRequest = null
-      }
+      appliedSavedRequests = removeAppliedSavedRequest(appliedSavedRequests, summary.id)
       saveInfoMessage = $i18n.t('request.savedRequestDeleted', {
         name: savedRequestMethodName(summary),
       })
@@ -953,6 +959,7 @@
       if (editingSavedRequest?.id === target.id) {
         editingSavedRequest = result.savedRequest
       }
+      appliedSavedRequests = replaceAppliedSavedRequest(appliedSavedRequests, result.savedRequest)
       saveInfoMessage = $i18n.t('request.savedRequestRenamed', { name })
       renamed = true
     } catch (error) {
@@ -1599,6 +1606,7 @@
       )
       dispatch('workspacesnapshot', result.workspace)
       editingSavedRequest = result.savedRequest
+      appliedSavedRequests = replaceAppliedSavedRequest(appliedSavedRequests, result.savedRequest)
       saveInfoMessage = $i18n.t(wasEditing ? 'request.saveRequestUpdated' : 'request.saveRequestSuccess', {
         name: savedRequestMethodName(result.savedRequest),
       })
@@ -2207,7 +2215,7 @@
                         class:method-service__method--active={selectedConnection.selectedMethodFullName === method.fullName}
                         class="method-service__method"
                         on:click={() => {
-                          appliedSavedRequest = null
+                          appliedSavedRequests = clearAppliedSavedRequest(appliedSavedRequests, selectedConnection.id)
                           selectMethod(selectedConnection.id, method.fullName)
                         }}
                         type="button"
@@ -2777,7 +2785,7 @@
           class="client-method-option"
           on:click={() => {
             if (selectedConnection) {
-              appliedSavedRequest = null
+              appliedSavedRequests = clearAppliedSavedRequest(appliedSavedRequests, selectedConnection.id)
               selectMethod(selectedConnection.id, method.fullName)
             }
             editingSavedRequest = null

@@ -316,36 +316,36 @@ select:focus-visible {
 .mobile-connection-drawer { background: rgba(28, 34, 36, 0.78) !important; backdrop-filter: blur(22px) saturate(1.06); }
 
 :root[data-theme='light'] {
-  --canvas: #d8dcdd;
-  --surface-1: rgba(249, 251, 251, 0.58);
-  --surface-2: rgba(240, 244, 244, 0.58);
-  --surface-3: rgba(221, 226, 226, 0.64);
-  --surface-raised: rgba(205, 211, 212, 0.7);
-  --input-bg: rgba(255, 255, 255, 0.48);
-  --border: rgba(41, 49, 50, 0.18);
-  --border-strong: rgba(41, 49, 50, 0.38);
-  --text: #202728;
-  --muted: #4f5a5b;
-  --subtle: #788486;
-  --accent: #4f5b5c;
-  --accent-primary: #4f5b5c;
-  --accent-hover: #30393a;
-  --accent-pressed: #6d797a;
-  --accent-bright: #202728;
-  --accent-soft: rgba(64, 75, 76, 0.11);
-  --selection: rgba(64, 75, 76, 0.13);
-  --success: #374345;
-  --warning: #596466;
+  --canvas: #dbe9fa;
+  --surface-1: rgba(249, 253, 255, 0.68);
+  --surface-2: rgba(231, 242, 255, 0.7);
+  --surface-3: rgba(204, 224, 247, 0.72);
+  --surface-raised: rgba(181, 209, 241, 0.76);
+  --input-bg: rgba(255, 255, 255, 0.58);
+  --border: rgba(30, 82, 143, 0.18);
+  --border-strong: rgba(30, 82, 143, 0.38);
+  --text: #10263f;
+  --muted: #465f7d;
+  --subtle: #6d84a0;
+  --accent: #286fcf;
+  --accent-primary: #286fcf;
+  --accent-hover: #185eba;
+  --accent-pressed: #1550a0;
+  --accent-bright: #174f9a;
+  --accent-soft: rgba(46, 121, 218, 0.13);
+  --selection: rgba(47, 125, 222, 0.17);
+  --success: #14845f;
+  --warning: #946a10;
   --danger: #b35f55;
-  --info: #465456;
-  --status-success: #374345;
-  --status-warning: #596466;
+  --info: #286fcf;
+  --status-success: #14845f;
+  --status-warning: #946a10;
   --status-error: #b35f55;
-  --status-info: #465456;
-  --glass: rgba(249, 252, 252, 0.6);
-  --glass-soft: rgba(240, 244, 244, 0.5);
-  --glass-strong: rgba(223, 229, 229, 0.7);
-  --shadow-soft: 0 20px 44px rgba(50, 61, 62, 0.16), inset 0 1px rgba(255, 255, 255, 0.92);
+  --status-info: #286fcf;
+  --glass: rgba(249, 253, 255, 0.68);
+  --glass-soft: rgba(229, 241, 255, 0.62);
+  --glass-strong: rgba(202, 223, 248, 0.74);
+  --shadow-soft: 0 20px 44px rgba(40, 88, 145, 0.17), inset 0 1px rgba(255, 255, 255, 0.94);
 }
 
 :root[data-theme='light'] body,
@@ -356,16 +356,16 @@ select:focus-visible {
 :root[data-theme='light'] .client-onboarding,
 :root[data-theme='light'] .request-table__empty:has(.onboarding-empty-state) {
   background:
-    radial-gradient(860px 560px at 84% -16%, rgba(255, 255, 255, 0.9), transparent 67%),
-    radial-gradient(700px 500px at -9% 102%, rgba(176, 187, 188, 0.28), transparent 72%),
-    #d8dcdd !important;
+    radial-gradient(860px 560px at 84% -16%, rgba(255, 255, 255, 0.94), transparent 67%),
+    radial-gradient(700px 500px at -9% 102%, rgba(108, 170, 246, 0.24), transparent 72%),
+    #dbe9fa !important;
 }
 
 :root[data-theme='light'] .connection-sidebar,
-:root[data-theme='light'] .sidebar-footer { background: rgba(235, 239, 239, 0.68) !important; }
-:root[data-theme='light'] .monitor-mode-switch { background: rgba(243, 247, 247, 0.57) !important; }
+:root[data-theme='light'] .sidebar-footer { background: rgba(224, 239, 255, 0.72) !important; }
+:root[data-theme='light'] .monitor-mode-switch { background: rgba(239, 248, 255, 0.68) !important; }
 :root[data-theme='light'] .traffic-view,
-:root[data-theme='light'] .unary-workbench { background: rgba(247, 250, 250, 0.25) !important; }
+:root[data-theme='light'] .unary-workbench { background: rgba(239, 248, 255, 0.34) !important; }
 :root[data-theme='light'] .sidebar-footer .workspace-chip,
 :root[data-theme='light'] .secondary-command,
 :root[data-theme='light'] .icon-command,
@@ -392,12 +392,69 @@ select:focus-visible {
 :root[data-theme='light'] .traffic-inspector__code { background: rgba(255, 255, 255, 0.43) !important; }
 
 :root[data-theme='light'] .primary-command {
-  border-color: rgba(37, 46, 47, 0.54) !important;
-  background: linear-gradient(145deg, #566263, #323b3c) !important;
+  border-color: rgba(27, 95, 187, 0.66) !important;
+  background: linear-gradient(145deg, #377dd8, #235ba9) !important;
   color: #f7fbfb !important;
 }
-:root[data-theme='light'] .primary-command:hover:not(:disabled) { background: linear-gradient(145deg, #435051, #242c2d) !important; }
-:root[data-theme='light'] .onboarding-empty-state__signal { box-shadow: inset 0 0 0 8px rgba(245, 248, 248, 0.88), inset 0 0 0 9px rgba(58, 69, 70, 0.45) !important; }
+:root[data-theme='light'] .primary-command:hover:not(:disabled) { background: linear-gradient(145deg, #4b8ee4, #2969bd) !important; }
+:root[data-theme='light'] .onboarding-empty-state__signal { box-shadow: inset 0 0 0 8px rgba(248, 252, 255, 0.92), inset 0 0 0 9px rgba(42, 111, 204, 0.52) !important; }
+
+/* The late dark-glass cascade above uses literal material values, so light mode
+   restores its own translucent blue layers after it. */
+:root[data-theme='light'] body,
+:root[data-theme='light'] .monitor-shell,
+:root[data-theme='light'] .monitor-content,
+:root[data-theme='light'] .traffic-layout,
+:root[data-theme='light'] .workbench-main,
+:root[data-theme='light'] .client-onboarding,
+:root[data-theme='light'] .request-table__empty:has(.onboarding-empty-state) {
+  background:
+    radial-gradient(860px 560px at 84% -16%, rgba(255, 255, 255, 0.94), transparent 67%),
+    radial-gradient(700px 500px at -9% 102%, rgba(108, 170, 246, 0.24), transparent 72%),
+    var(--canvas) !important;
+}
+
+:root[data-theme='light'] .connection-sidebar,
+:root[data-theme='light'] .sidebar-footer { background: rgba(224, 239, 255, 0.72) !important; }
+:root[data-theme='light'] .monitor-mode-switch { background: rgba(239, 248, 255, 0.68) !important; }
+:root[data-theme='light'] .traffic-view,
+:root[data-theme='light'] .unary-workbench { background: rgba(239, 248, 255, 0.34) !important; }
+:root[data-theme='light'] .sidebar-footer .workspace-chip,
+:root[data-theme='light'] .secondary-command,
+:root[data-theme='light'] .icon-command,
+:root[data-theme='light'] .editor-command,
+:root[data-theme='light'] .traffic-filter,
+:root[data-theme='light'] .traffic-search,
+:root[data-theme='light'] .client-method-trigger,
+:root[data-theme='light'] .response-panel__tabs,
+:root[data-theme='light'] .modal-field input,
+:root[data-theme='light'] .modal-field textarea,
+:root[data-theme='light'] .modal-field select,
+:root[data-theme='light'] .catalog-tabs,
+:root[data-theme='light'] .reflection-hint,
+:root[data-theme='light'] .tls-settings-panel,
+:root[data-theme='light'] .proto-dropzone,
+:root[data-theme='light'] .material-field,
+:root[data-theme='light'] .json-editor-shell,
+:root[data-theme='light'] .json-editor,
+:root[data-theme='light'] .code-block,
+:root[data-theme='light'] .authorization-input,
+:root[data-theme='light'] .method-summary div,
+:root[data-theme='light'] .stream-panel__summary div,
+:root[data-theme='light'] .stream-panel__call,
+:root[data-theme='light'] .traffic-inspector__code { background: rgba(255, 255, 255, 0.54) !important; }
+
+:root[data-theme='light'] .connection-item:hover,
+:root[data-theme='light'] .connection-item--active,
+:root[data-theme='light'] .connection-item--active:hover,
+:root[data-theme='light'] .request-table__row--button:hover,
+:root[data-theme='light'] .request-table__row--selected { background: rgba(69, 137, 230, 0.14) !important; }
+:root[data-theme='light'] .traffic-metrics-line,
+:root[data-theme='light'] .request-table__head,
+:root[data-theme='light'] .traffic-request-detail__meta > span:not(.response-status-badge),
+:root[data-theme='light'] .traffic-request-detail__timeline,
+:root[data-theme='light'] .traffic-timeline > div,
+:root[data-theme='light'] .client-timeline > div { background: rgba(124, 179, 242, 0.16) !important; }
 
 /* JSON remains readable, but is deliberately neutral rather than IDE-blue. */
 :root {
@@ -444,14 +501,19 @@ select:focus-visible {
 }
 
 .schema-contract__head > span,
-.schema-contract__fields span,
-.traffic-request-detail__timeline-head strong {
+.schema-contract__fields span {
   border: 1px solid var(--signal-line) !important;
   background: var(--signal-soft) !important;
   color: var(--signal-bright) !important;
 }
 .schema-contract__fields span { border: 0 !important; background: transparent !important; }
 .schema-contract__fields > div { border-bottom-color: rgba(228, 235, 236, 0.14) !important; }
+.traffic-request-detail__timeline-head strong {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--text) !important;
+}
 
 .client-timeline i,
 .traffic-timeline i {
@@ -487,15 +549,15 @@ select:focus-visible {
 }
 
 :root[data-theme='light'] {
-  --text: #172126;
-  --muted: #3f4d52;
-  --subtle: #66757b;
-  --border: rgba(32, 43, 47, 0.25);
-  --border-strong: rgba(32, 43, 47, 0.5);
-  --signal: #735b9d;
-  --signal-bright: #533c7b;
-  --signal-soft: rgba(115, 91, 157, 0.17);
-  --signal-line: rgba(93, 68, 137, 0.58);
+  --text: #15263d;
+  --muted: #4f6885;
+  --subtle: #7187a1;
+  --border: rgba(40, 88, 145, 0.22);
+  --border-strong: rgba(40, 88, 145, 0.42);
+  --signal: #3d7ecc;
+  --signal-bright: #245fba;
+  --signal-soft: rgba(61, 126, 204, 0.15);
+  --signal-line: rgba(54, 122, 204, 0.48);
 }
 
 :root[data-theme='light'] .traffic-request-detail,
@@ -505,33 +567,34 @@ select:focus-visible {
 :root[data-theme='light'] .stream-timeline__event,
 :root[data-theme='light'] .response-panel,
 :root[data-theme='light'] .traffic-inspector {
-  background: rgba(255, 255, 255, 0.7) !important;
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.96), 0 11px 28px rgba(48, 59, 63, 0.11) !important;
+  background: var(--glass) !important;
+  box-shadow: var(--shadow-soft), inset 0 1px rgba(255, 255, 255, 0.78) !important;
 }
 :root[data-theme='light'] .client-timeline b,
 :root[data-theme='light'] .traffic-timeline b,
 :root[data-theme='light'] .traffic-request-detail__timeline b {
-  background: linear-gradient(90deg, #735b9d 0%, #aa93ca 48%, #e6ddf4 100%) !important;
-  box-shadow: 0 0 12px rgba(115, 91, 157, 0.18) !important;
+  background: linear-gradient(90deg, #3d7ecc 0%, #78b2ef 48%, #d9edff 100%) !important;
+  box-shadow: 0 0 12px rgba(61, 126, 204, 0.16) !important;
 }
 :root[data-theme='light'] .settings-option-card.selected-option,
 :root[data-theme='light'] .composer-tab--active,
 :root[data-theme='light'] .client-method-option--active,
 :root[data-theme='light'] .catalog-tabs button[aria-selected='true'],
 :root[data-theme='light'] .response-panel__tabs button[aria-selected='true'] {
-  background: linear-gradient(135deg, rgba(115, 91, 157, 0.2), rgba(230, 221, 244, 0.64)) !important;
-  color: #291e3d !important;
+  border-color: rgba(61, 126, 204, 0.45) !important;
+  background: linear-gradient(135deg, rgba(61, 126, 204, 0.18), rgba(221, 239, 255, 0.72)) !important;
+  color: #173c71 !important;
 }
 :root[data-theme='light'] .connection-item--active,
 :root[data-theme='light'] .connection-item--active:hover {
-  outline-color: rgba(83, 60, 123, 0.72) !important;
-  background: linear-gradient(90deg, rgba(115, 91, 157, 0.27), rgba(230, 221, 244, 0.7)) !important;
-  box-shadow: inset 3px 0 #533c7b, inset 0 1px rgba(255, 255, 255, 0.88) !important;
+  outline-color: rgba(48, 116, 202, 0.62) !important;
+  background: linear-gradient(90deg, rgba(61, 126, 204, 0.22), rgba(224, 241, 255, 0.72)) !important;
+  box-shadow: inset 2px 0 #3d7ecc, inset 0 1px rgba(255, 255, 255, 0.88) !important;
 }
 :root[data-theme='light'] .request-table__row--button:hover,
 :root[data-theme='light'] .request-table__row--selected {
-  background: linear-gradient(90deg, rgba(115, 91, 157, 0.22), rgba(230, 221, 244, 0.52)) !important;
-  box-shadow: inset 3px 0 #735b9d, inset 0 1px rgba(255, 255, 255, 0.84) !important;
+  background: linear-gradient(90deg, rgba(61, 126, 204, 0.11), rgba(224, 241, 255, 0.42)) !important;
+  box-shadow: inset 2px 0 rgba(61, 126, 204, 0.78), inset 0 1px rgba(255, 255, 255, 0.76) !important;
 }
 
 /* Dedicated dark-mode finish. The existing timeline has older navy rules in
@@ -547,32 +610,35 @@ select:focus-visible {
 :root:not([data-theme='light']) .client-timeline,
 :root:not([data-theme='light']) .traffic-timeline,
 :root:not([data-theme='light']) .traffic-request-detail__timeline {
-  border: 1px solid rgba(213, 198, 241, 0.36) !important;
-  background: linear-gradient(135deg, rgba(44, 43, 54, 0.88), rgba(25, 31, 34, 0.9)) !important;
-  box-shadow: inset 0 1px rgba(244, 239, 255, 0.14), 0 12px 30px rgba(0, 0, 0, 0.24) !important;
+  border: 1px solid rgba(155, 202, 255, 0.32) !important;
+  background: linear-gradient(135deg, rgba(21, 51, 88, 0.9), rgba(9, 29, 58, 0.92)) !important;
+  box-shadow: inset 0 1px rgba(220, 239, 255, 0.11), 0 12px 30px rgba(0, 8, 22, 0.24) !important;
 }
 :root:not([data-theme='light']) .client-timeline > div,
 :root:not([data-theme='light']) .traffic-timeline > div {
-  border-color: rgba(221, 230, 233, 0.24) !important;
-  background: rgba(242, 235, 255, 0.065) !important;
-  color: #d4dde0 !important;
+  border-color: rgba(165, 207, 255, 0.22) !important;
+  background: rgba(73, 133, 207, 0.12) !important;
+  color: #c7dcf5 !important;
 }
 :root:not([data-theme='light']) .client-timeline i,
 :root:not([data-theme='light']) .traffic-timeline i {
-  background: #343b46 !important;
+  background: #203d62 !important;
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.09), inset 0 -1px rgba(0, 0, 0, 0.36) !important;
 }
 :root:not([data-theme='light']) .client-timeline b,
 :root:not([data-theme='light']) .traffic-timeline b,
 :root:not([data-theme='light']) .traffic-request-detail__timeline b {
-  background: linear-gradient(90deg, #8c78b7 0%, #c7b7e7 52%, #f0ecfa 100%) !important;
-  box-shadow: 0 0 18px rgba(177, 152, 221, 0.34) !important;
+  background: linear-gradient(90deg, #3f82d8 0%, #70b4ff 52%, #d5ecff 100%) !important;
+  box-shadow: 0 0 18px rgba(85, 161, 255, 0.24) !important;
 }
-:root:not([data-theme='light']) .traffic-request-detail,
+:root:not([data-theme='light']) .traffic-request-detail {
+  background: linear-gradient(145deg, rgba(17, 42, 74, 0.64), rgba(10, 27, 51, 0.7)) !important;
+  border-color: rgba(161, 205, 255, 0.2) !important;
+}
 :root:not([data-theme='light']) .traffic-inspector,
 :root:not([data-theme='light']) .response-panel {
-  background: linear-gradient(145deg, rgba(37, 42, 47, 0.82), rgba(21, 26, 29, 0.78)) !important;
-  border-color: rgba(221, 230, 233, 0.24) !important;
+  background: linear-gradient(145deg, rgba(20, 49, 84, 0.76), rgba(10, 30, 58, 0.82)) !important;
+  border-color: rgba(161, 205, 255, 0.24) !important;
 }
 
 /* Connection hover is intentionally more obvious than selection at rest. */
@@ -651,25 +717,25 @@ select:focus-visible {
 /* Light connection selection is intentionally high-contrast, even on a pearl surface. */
 :root[data-theme='light'] .connection-item--active,
 :root[data-theme='light'] .connection-item--active:hover {
-  border-bottom-color: rgba(83, 60, 123, 0.38) !important;
+  border-bottom-color: rgba(47, 111, 190, 0.34) !important;
   outline: 0 !important;
-  background: linear-gradient(90deg, #d4c9e9 0%, #eee9f6 70%, rgba(255, 255, 255, 0.45) 100%) !important;
-  box-shadow: inset 4px 0 #62458f, inset 0 1px rgba(255, 255, 255, 0.96), 0 7px 16px rgba(89, 67, 129, 0.12) !important;
+  background: linear-gradient(90deg, rgba(65, 138, 222, 0.2) 0%, rgba(227, 242, 255, 0.78) 70%, rgba(255, 255, 255, 0.45) 100%) !important;
+  box-shadow: inset 3px 0 #3d7ecc, inset 0 1px rgba(255, 255, 255, 0.96), 0 7px 16px rgba(46, 97, 162, 0.1) !important;
 }
-:root[data-theme='light'] .connection-item--active strong { color: #2f2048 !important; }
+:root[data-theme='light'] .connection-item--active strong { color: #173c71 !important; }
 :root[data-theme='light'] .connection-item--active .connection-item__main > span,
-:root[data-theme='light'] .connection-item--active small { color: #62458f !important; }
+:root[data-theme='light'] .connection-item--active small { color: #3d6e9f !important; }
 
 /* Hover is separate from the selected connection, so switching services is
    always discoverable in the pearl rail. */
 :root[data-theme='light'] .connection-item:hover:not(.connection-item--active) {
-  border-bottom-color: rgba(98, 69, 143, 0.3) !important;
-  background: linear-gradient(90deg, rgba(217, 205, 238, 0.84), rgba(249, 247, 253, 0.9)) !important;
-  box-shadow: inset 3px 0 #a28ac5, inset 0 1px rgba(255, 255, 255, 0.98), 0 6px 14px rgba(89, 67, 129, 0.1) !important;
+  border-bottom-color: rgba(62, 127, 210, 0.28) !important;
+  background: linear-gradient(90deg, rgba(199, 225, 250, 0.76), rgba(247, 252, 255, 0.9)) !important;
+  box-shadow: inset 3px 0 #7badde, inset 0 1px rgba(255, 255, 255, 0.98), 0 6px 14px rgba(46, 97, 162, 0.08) !important;
 }
-:root[data-theme='light'] .connection-item:hover:not(.connection-item--active) strong { color: #382654 !important; }
+:root[data-theme='light'] .connection-item:hover:not(.connection-item--active) strong { color: #1d4d82 !important; }
 :root[data-theme='light'] .connection-item:hover:not(.connection-item--active) .connection-item__main > span,
-:root[data-theme='light'] .connection-item:hover:not(.connection-item--active) small { color: #705494 !important; }
+:root[data-theme='light'] .connection-item:hover:not(.connection-item--active) small { color: #4d739e !important; }
 
 /* Timeline is one of the work surfaces, not a coloured card. Lilac belongs
    only to the elapsed portion of the meter. */
@@ -677,14 +743,14 @@ select:focus-visible {
 :root:not([data-theme='light']) .client-timeline,
 :root:not([data-theme='light']) .traffic-timeline,
 :root:not([data-theme='light']) .traffic-request-detail__timeline {
-  border-color: rgba(221, 230, 233, 0.25) !important;
-  background: #171c1f !important;
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.065), 0 14px 32px rgba(0, 0, 0, 0.22) !important;
+  border-color: rgba(161, 205, 255, 0.25) !important;
+  background: rgba(13, 36, 67, 0.82) !important;
+  box-shadow: inset 0 1px rgba(220, 239, 255, 0.075), 0 14px 32px rgba(0, 8, 22, 0.22) !important;
 }
 :root:not([data-theme='light']) .client-timeline > div,
 :root:not([data-theme='light']) .traffic-timeline > div {
-  border-color: rgba(221, 230, 233, 0.22) !important;
-  background: #22292d !important;
+  border-color: rgba(161, 205, 255, 0.22) !important;
+  background: rgba(40, 83, 132, 0.4) !important;
 }
 
 /* Dense connection rail: stable operational scan, no oversized empty cards. */
@@ -1173,7 +1239,12 @@ button { color: inherit; }
 }
 .sidebar-footer .workspace-menu-host { grid-column: 1 / -1; min-width: 0; }
 .sidebar-footer .workspace-chip { width: 100%; max-width: none; justify-content: space-between; }
-.sidebar-footer .primary-command { width: 100%; min-width: 0; }
+.sidebar-footer .primary-command {
+  width: 100%;
+  min-width: 0;
+  background: linear-gradient(135deg, #3d7ed3, #2d65b4) !important;
+  box-shadow: 0 7px 16px rgba(37, 92, 164, 0.24), inset 0 1px rgba(229, 244, 255, 0.4) !important;
+}
 .sidebar-footer .workspace-menu {
   top: auto;
   right: auto;
@@ -1262,11 +1333,11 @@ button { color: inherit; }
 .traffic-layout--expanded-rows .request-table__row { grid-template-columns: 74px minmax(130px, 1.15fr) minmax(120px, 0.9fr) 58px 72px 88px 24px; }
 .traffic-request-detail {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 10px;
+  padding: 12px 14px;
   scroll-margin-block: 18vh;
   border-bottom: 1px solid var(--line);
-  background: linear-gradient(145deg, rgba(47, 91, 148, 0.2), rgba(13, 31, 51, 0.2));
+  background: linear-gradient(145deg, rgba(47, 91, 148, 0.12), rgba(13, 31, 51, 0.12));
 }
 .traffic-request-detail__head,
 .traffic-request-detail__meta,
@@ -1659,14 +1730,22 @@ button { color: inherit; }
   overflow: visible;
   grid-template-rows: auto auto auto;
 }
-.workbench-panels { align-items: stretch; overflow: hidden; }
+.workbench-panels { align-items: stretch; overflow: visible; min-block-size: 0; }
 .workbench-main .workbench-panels {
-  height: min(560px, 58vh);
-  min-height: 380px !important;
+  height: auto;
+  min-height: 0 !important;
 }
 .workbench-main .composer-panel { overflow: auto; }
 .workbench-main .response-panel { overflow: hidden; }
+.workbench-main .composer-panel,
+.workbench-main .response-panel { min-block-size: 0; }
 .workbench-main .workbench-panels { min-height: 0 !important; }
+.workbench-main .composer-field--textarea { flex: 0 0 auto; }
+.workbench-main .json-editor-shell {
+  flex: 0 0 clamp(280px, 34vh, 360px);
+  height: clamp(280px, 34vh, 360px);
+  min-height: 280px;
+}
 .workbench-main .response-viewer,
 .workbench-main .response-viewer__panel { overflow: hidden; }
 .workbench-main .response-viewer__code {
@@ -1738,10 +1817,10 @@ button { color: inherit; }
 :root[data-theme='light'] .client-command-bar,
 :root[data-theme='light'] .client-support-grid,
 :root[data-theme='light'] .client-support-card {
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--glass);
 }
 :root[data-theme='light'] .composer-panel,
-:root[data-theme='light'] .response-panel { background: rgba(255, 255, 255, 0.66); }
+:root[data-theme='light'] .response-panel { background: var(--glass-soft); }
 :root[data-theme='light'] .client-method-trigger,
 :root[data-theme='light'] .client-method-search,
 :root[data-theme='light'] .client-support-card__search {
@@ -2609,41 +2688,41 @@ select:focus-visible {
   .mobile-connection-drawer__empty { padding: 20px 16px; color: var(--muted); font-size: 0.75rem; line-height: 1.5; }
 }
 
-/* Graphite Flux Glass takes precedence over the legacy palette above. */
+/* Midnight Blue Glass takes precedence over the legacy palette above. */
 :root {
-  --canvas: #111516;
-  --surface-1: rgba(37, 43, 45, 0.66);
-  --surface-2: rgba(62, 69, 72, 0.42);
-  --surface-3: rgba(91, 99, 102, 0.42);
-  --surface-raised: rgba(117, 125, 128, 0.48);
-  --input-bg: rgba(8, 11, 12, 0.46);
-  --border: rgba(228, 235, 236, 0.18);
-  --border-strong: rgba(237, 243, 244, 0.4);
-  --text: #f2f5f5;
-  --muted: #c0c8c9;
-  --subtle: #919d9f;
-  --accent: #e5ecec;
-  --accent-primary: #e5ecec;
-  --accent-hover: #f7fbfb;
-  --accent-pressed: #bac6c7;
-  --accent-bright: #ffffff;
-  --accent-soft: rgba(232, 239, 239, 0.13);
-  --selection: rgba(232, 239, 239, 0.16);
-  --success: #dce5e4;
-  --warning: #d4dcdd;
+  --canvas: #07101d;
+  --surface-1: rgba(16, 34, 57, 0.68);
+  --surface-2: rgba(29, 54, 87, 0.5);
+  --surface-3: rgba(48, 78, 116, 0.5);
+  --surface-raised: rgba(69, 105, 151, 0.58);
+  --input-bg: rgba(5, 16, 31, 0.54);
+  --border: rgba(178, 211, 255, 0.2);
+  --border-strong: rgba(183, 218, 255, 0.44);
+  --text: #f1f6ff;
+  --muted: #b6c8e1;
+  --subtle: #8197b5;
+  --accent: #65a5ff;
+  --accent-primary: #65a5ff;
+  --accent-hover: #8bbcff;
+  --accent-pressed: #4386e5;
+  --accent-bright: #b9d7ff;
+  --accent-soft: rgba(86, 153, 255, 0.17);
+  --selection: rgba(91, 158, 255, 0.22);
+  --success: #65d7ae;
+  --warning: #ebc66c;
   --danger: #dc7d70;
-  --info: #cbd5d6;
-  --status-success: #dce5e4;
-  --status-warning: #d4dcdd;
+  --info: #7bb5ff;
+  --status-success: #65d7ae;
+  --status-warning: #ebc66c;
   --status-error: #dc7d70;
-  --status-info: #cbd5d6;
-  --glass: rgba(37, 43, 45, 0.66);
-  --glass-soft: rgba(52, 59, 61, 0.42);
-  --glass-strong: rgba(70, 78, 81, 0.6);
+  --status-info: #7bb5ff;
+  --glass: rgba(16, 34, 57, 0.68);
+  --glass-soft: rgba(24, 48, 79, 0.48);
+  --glass-strong: rgba(43, 72, 107, 0.64);
   --line: var(--border);
   --line-strong: var(--border-strong);
-  --shadow-soft: 0 22px 52px rgba(0, 0, 0, 0.32), inset 0 1px rgba(255, 255, 255, 0.06);
-  --shadow-accent: 0 0 0 1px rgba(243, 249, 249, 0.06), 0 16px 34px rgba(0, 0, 0, 0.2);
+  --shadow-soft: 0 22px 52px rgba(0, 7, 20, 0.38), inset 0 1px rgba(214, 234, 255, 0.08);
+  --shadow-accent: 0 14px 32px rgba(33, 104, 208, 0.24), inset 0 1px rgba(215, 235, 255, 0.12);
   --radius-panel: 14px;
   --radius-control: 9px;
 }
@@ -2656,15 +2735,15 @@ body,
 .client-onboarding,
 .request-table__empty:has(.onboarding-empty-state) {
   background:
-    radial-gradient(760px 520px at 84% -18%, rgba(228, 237, 238, 0.09), transparent 68%),
-    radial-gradient(620px 480px at -12% 96%, rgba(186, 198, 199, 0.07), transparent 72%),
-    #111516 !important;
+    radial-gradient(800px 560px at 88% -18%, rgba(66, 137, 247, 0.24), transparent 67%),
+    radial-gradient(680px 520px at -12% 96%, rgba(46, 101, 189, 0.16), transparent 70%),
+    #07101d !important;
 }
 
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
-select:focus-visible { outline-color: rgba(245, 251, 251, 0.72); }
+select:focus-visible { outline-color: rgba(169, 210, 255, 0.86); }
 
 .connection-sidebar,
 .sidebar-footer,
@@ -2692,7 +2771,7 @@ select:focus-visible { outline-color: rgba(245, 251, 251, 0.72); }
 }
 
 .connection-sidebar,
-.sidebar-footer { background: rgba(29, 35, 37, 0.76) !important; }
+.sidebar-footer { background: rgba(11, 27, 48, 0.78) !important; }
 .connection-sidebar { border-right-color: var(--border-strong) !important; }
 .sidebar-footer { border-top-color: var(--border-strong) !important; }
 .connection-sidebar__head,
@@ -2712,15 +2791,15 @@ select:focus-visible { outline-color: rgba(245, 251, 251, 0.72); }
 .onboarding-empty-state__steps li::before,
 .client-onboarding__sequence li > span { color: var(--subtle) !important; }
 
-.connection-item { border-bottom-color: rgba(229, 236, 237, 0.11) !important; background: transparent !important; }
+.connection-item { border-bottom-color: rgba(181, 213, 255, 0.12) !important; background: transparent !important; }
 .connection-item:hover,
 .connection-item--active,
 .connection-item--active:hover {
-  background: rgba(236, 243, 243, 0.085) !important;
-  box-shadow: inset 1px 0 rgba(248, 252, 252, 0.58), inset 0 1px rgba(255, 255, 255, 0.08) !important;
+  background: rgba(96, 163, 255, 0.15) !important;
+  box-shadow: inset 1px 0 rgba(135, 192, 255, 0.86), inset 0 1px rgba(219, 239, 255, 0.12) !important;
 }
-.connection-item--active { outline-color: rgba(244, 250, 250, 0.28) !important; }
-.connection-status { box-shadow: 0 0 0 3px rgba(226, 235, 235, 0.13) !important; }
+.connection-item--active { outline-color: rgba(121, 182, 255, 0.42) !important; }
+.connection-status { box-shadow: 0 0 0 3px rgba(120, 181, 255, 0.16) !important; }
 .connection-sparkline polyline { stroke: var(--muted) !important; }
 .connection-sparkline strong { color: var(--muted) !important; }
 
@@ -2749,8 +2828,8 @@ select:focus-visible { outline-color: rgba(245, 251, 251, 0.72); }
 .stream-panel__call,
 .traffic-inspector__code {
   border-color: var(--border) !important;
-  background: rgba(8, 11, 12, 0.34) !important;
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
+  background: rgba(4, 15, 30, 0.42) !important;
+  box-shadow: inset 0 1px rgba(220, 239, 255, 0.05);
 }
 .sidebar-footer .workspace-chip:hover,
 .secondary-command:hover,
@@ -2758,24 +2837,24 @@ select:focus-visible { outline-color: rgba(245, 251, 251, 0.72); }
 .editor-command:hover,
 .traffic-filter:hover,
 .traffic-search:hover,
-.client-method-trigger:hover { border-color: var(--border-strong) !important; background: rgba(231, 238, 238, 0.11) !important; }
+.client-method-trigger:hover { border-color: var(--border-strong) !important; background: rgba(98, 164, 255, 0.13) !important; }
 
 .primary-command {
-  border-color: rgba(255, 255, 255, 0.76) !important;
-  background: linear-gradient(145deg, #f5f9f9, #c9d2d3) !important;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22), inset 0 1px rgba(255, 255, 255, 0.72) !important;
-  color: #202728 !important;
+  border-color: rgba(175, 215, 255, 0.76) !important;
+  background: linear-gradient(145deg, #76b2ff, #3c78d4) !important;
+  box-shadow: 0 10px 24px rgba(7, 39, 91, 0.38), inset 0 1px rgba(230, 244, 255, 0.58) !important;
+  color: #f8fbff !important;
 }
-.primary-command:hover:not(:disabled) { background: linear-gradient(145deg, #ffffff, #d9e2e2) !important; transform: translateY(-1px); }
-.primary-command:disabled { border-color: var(--border) !important; background: rgba(128, 138, 140, 0.28) !important; box-shadow: none !important; color: var(--subtle) !important; }
+.primary-command:hover:not(:disabled) { background: linear-gradient(145deg, #94c4ff, #4d8ae7) !important; transform: translateY(-1px); }
+.primary-command:disabled { border-color: var(--border) !important; background: rgba(73, 103, 145, 0.34) !important; box-shadow: none !important; color: var(--subtle) !important; }
 
-.monitor-mode-switch { background: rgba(28, 34, 36, 0.62) !important; }
+.monitor-mode-switch { background: rgba(11, 26, 47, 0.66) !important; }
 .monitor-mode-switch__button { border-bottom-color: transparent !important; border-radius: 8px 8px 0 0 !important; color: var(--subtle) !important; }
-.monitor-mode-switch__button:hover { background: rgba(239, 245, 245, 0.06) !important; color: var(--text) !important; }
-.monitor-mode-switch__button--active { border-bottom-color: rgba(244, 250, 250, 0.72) !important; background: rgba(242, 248, 248, 0.09) !important; color: var(--text) !important; box-shadow: inset 0 1px rgba(255, 255, 255, 0.08) !important; }
+.monitor-mode-switch__button:hover { background: rgba(104, 169, 255, 0.1) !important; color: var(--text) !important; }
+.monitor-mode-switch__button--active { border-bottom-color: var(--accent) !important; background: rgba(95, 163, 255, 0.14) !important; color: var(--text) !important; box-shadow: inset 0 1px rgba(205, 231, 255, 0.14) !important; }
 
 .traffic-view,
-.unary-workbench { background: rgba(16, 20, 21, 0.27) !important; }
+.unary-workbench { background: rgba(7, 19, 37, 0.32) !important; }
 .traffic-layout .request-log,
 .request-log,
 .workbench-main { background: transparent !important; }
@@ -2786,27 +2865,27 @@ select:focus-visible { outline-color: rgba(245, 251, 251, 0.72); }
 .traffic-request-detail__meta > span:not(.response-status-badge),
 .traffic-request-detail__timeline,
 .traffic-timeline > div,
-.client-timeline > div { border-color: var(--border) !important; background: rgba(225, 233, 234, 0.075) !important; box-shadow: inset 0 1px rgba(255, 255, 255, 0.05); }
-.request-table__row { border-color: rgba(229, 236, 237, 0.1) !important; background: transparent !important; }
+.client-timeline > div { border-color: var(--border) !important; background: rgba(85, 147, 235, 0.11) !important; box-shadow: inset 0 1px rgba(217, 237, 255, 0.08); }
+.request-table__row { border-color: rgba(181, 213, 255, 0.11) !important; background: transparent !important; }
 .request-table__row--button:hover,
-.request-table__row--selected { background: rgba(233, 240, 240, 0.09) !important; color: var(--text) !important; }
+.request-table__row--selected { background: rgba(91, 158, 255, 0.09) !important; color: var(--text) !important; }
 
 .composer-tab { color: var(--subtle) !important; }
-.composer-tab:hover { background: rgba(239, 246, 246, 0.075) !important; color: var(--text) !important; }
-.composer-tab--active { border-color: rgba(239, 246, 246, 0.46) !important; background: rgba(238, 245, 245, 0.11) !important; color: var(--text) !important; }
+.composer-tab:hover { background: rgba(100, 167, 255, 0.1) !important; color: var(--text) !important; }
+.composer-tab--active { border-color: rgba(132, 190, 255, 0.62) !important; background: rgba(91, 158, 255, 0.15) !important; color: var(--text) !important; }
 .json-editor-highlight,
 .json-editor { color: var(--text) !important; }
 .json-editor-shell .json-editor { color: transparent !important; }
-.json-key { color: #cdd8d8 !important; }
-.json-string { color: #e5ecec !important; }
+.json-key { color: #93c2ff !important; }
+.json-string { color: #78e1b5 !important; }
 .json-number,
 .json-boolean,
-.json-null { color: #c7b2aa !important; }
+.json-null { color: #f0c77a !important; }
 
 .response-status-badge,
 .stream-state,
 .connection-item__status--healthy,
-.traffic-request-detail__status--ok { border-color: rgba(235, 242, 242, 0.26) !important; background: rgba(230, 238, 238, 0.12) !important; color: var(--text) !important; }
+.traffic-request-detail__status--ok { border-color: rgba(108, 216, 177, 0.38) !important; background: rgba(79, 190, 149, 0.13) !important; color: var(--text) !important; }
 .response-status-badge--error,
 .traffic-request-detail__status--error,
 .connection-item__status--error { color: var(--danger) !important; }
@@ -2815,45 +2894,173 @@ select:focus-visible { outline-color: rgba(245, 251, 251, 0.72); }
 .traffic-request-detail__timeline { color: var(--muted) !important; }
 .client-timeline b,
 .traffic-timeline b,
-.traffic-request-detail__timeline b { background: linear-gradient(90deg, rgba(242, 248, 248, 0.86), rgba(182, 193, 194, 0.7)) !important; animation: none !important; }
+.traffic-request-detail__timeline b { background: linear-gradient(90deg, #4d91ee, #91c9ff) !important; animation: none !important; }
 
-.onboarding-empty-state__signal { border-color: rgba(238, 245, 245, 0.58) !important; background: radial-gradient(circle, #edf4f4 0 2px, transparent 3px) !important; box-shadow: inset 0 0 0 8px rgba(19, 23, 24, 0.86), inset 0 0 0 9px rgba(238, 245, 245, 0.52) !important; }
+.onboarding-empty-state__signal { border-color: rgba(150, 201, 255, 0.72) !important; background: radial-gradient(circle, #a8d2ff 0 2px, transparent 3px) !important; box-shadow: inset 0 0 0 8px rgba(6, 18, 35, 0.88), inset 0 0 0 9px rgba(141, 195, 255, 0.65) !important; }
 .fullscreen-backdrop,
-.overlay-backdrop { background: rgba(8, 11, 12, 0.58) !important; backdrop-filter: blur(14px) saturate(0.94); }
+.overlay-backdrop { background: rgba(3, 12, 26, 0.62) !important; backdrop-filter: blur(14px) saturate(1.08); }
 .mobile-connection-bar,
-.mobile-connection-drawer { background: rgba(28, 34, 36, 0.78) !important; backdrop-filter: blur(22px) saturate(1.06); }
+.mobile-connection-drawer { background: rgba(11, 27, 48, 0.82) !important; backdrop-filter: blur(22px) saturate(1.1); }
+
+/* Soft glass refinement: replace table-like interaction cells with tactile contours. */
+:root {
+  --radius-panel: 18px;
+  --radius-control: 12px;
+}
+
+.connection-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px 9px 150px;
+}
+
+.connection-item {
+  min-height: 0;
+  padding: 16px 14px 16px 16px;
+  border: 1px solid transparent !important;
+  border-radius: 16px;
+  background: rgba(11, 28, 50, 0.18) !important;
+  transition: background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+.connection-item:hover {
+  border-color: rgba(148, 198, 255, 0.27) !important;
+  background: linear-gradient(135deg, rgba(89, 157, 255, 0.17), rgba(20, 49, 84, 0.26)) !important;
+  box-shadow: 0 10px 26px rgba(2, 15, 35, 0.2), inset 0 1px rgba(221, 239, 255, 0.1) !important;
+  transform: translateY(-1px);
+}
+
+.connection-item--active,
+.connection-item--active:hover {
+  border-color: rgba(154, 205, 255, 0.46) !important;
+  outline: none !important;
+  background: linear-gradient(135deg, rgba(72, 143, 239, 0.28), rgba(26, 57, 99, 0.42)) !important;
+  box-shadow: 0 14px 32px rgba(2, 16, 40, 0.28), inset 0 1px rgba(226, 242, 255, 0.16) !important;
+}
+
+.connection-item__main:focus-visible {
+  border-radius: 10px;
+  outline: 2px solid rgba(169, 210, 255, 0.88);
+  outline-offset: 3px;
+}
+
+.connection-item__menu {
+  border-radius: 50%;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.connection-item__menu:hover,
+.connection-item__menu[aria-expanded='true'] {
+  background: rgba(137, 191, 255, 0.16) !important;
+  color: var(--text) !important;
+  transform: scale(1.05);
+}
+
+.monitor-mode-switch {
+  min-height: 56px;
+  margin: 0;
+  border: 0 !important;
+  border-bottom: 1px solid var(--border) !important;
+  border-radius: 0 !important;
+  box-shadow: none;
+}
+
+.monitor-mode-switch__button {
+  min-height: 36px;
+  margin: 0;
+  border-radius: 10px !important;
+}
+
+.monitor-mode-switch__button--active {
+  border-bottom-color: var(--accent) !important;
+  box-shadow: inset 0 -2px var(--accent), inset 0 1px rgba(215, 238, 255, 0.14) !important;
+}
+
+:root[data-theme='light'] .connection-item {
+  background: rgba(255, 255, 255, 0.36) !important;
+}
+
+:root[data-theme='light'] .connection-item:hover {
+  border-color: rgba(43, 111, 198, 0.25) !important;
+  background: linear-gradient(135deg, rgba(70, 145, 236, 0.16), rgba(255, 255, 255, 0.62)) !important;
+  box-shadow: 0 10px 24px rgba(36, 86, 146, 0.12), inset 0 1px rgba(255, 255, 255, 0.9) !important;
+}
+
+:root[data-theme='light'] .connection-item--active,
+:root[data-theme='light'] .connection-item--active:hover {
+  border-color: rgba(42, 111, 204, 0.4) !important;
+  background: linear-gradient(135deg, rgba(59, 132, 224, 0.24), rgba(255, 255, 255, 0.72)) !important;
+  box-shadow: 0 14px 28px rgba(37, 87, 148, 0.16), inset 0 1px rgba(255, 255, 255, 0.92) !important;
+}
+
+:root[data-theme='light'] .monitor-mode-switch__button--active {
+  border-bottom-color: #3d7ecc !important;
+  background: rgba(61, 126, 204, 0.13) !important;
+  box-shadow: inset 0 -2px #3d7ecc, inset 0 1px rgba(255, 255, 255, 0.72) !important;
+}
+
+:root[data-theme='light'] .composer-tab--active,
+:root[data-theme='light'] .client-method-option--active,
+:root[data-theme='light'] .settings-option-card.selected-option,
+:root[data-theme='light'] .catalog-tabs button[aria-selected='true'],
+:root[data-theme='light'] .response-panel__tabs button[aria-selected='true'] {
+  border-color: rgba(61, 126, 204, 0.5) !important;
+  background: linear-gradient(135deg, rgba(61, 126, 204, 0.16), rgba(228, 242, 255, 0.72)) !important;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.78), 0 6px 16px rgba(48, 106, 173, 0.1) !important;
+  color: #173c71 !important;
+}
 
 :root[data-theme='light'] {
-  --canvas: #d8dcdd;
-  --surface-1: rgba(249, 251, 251, 0.58);
-  --surface-2: rgba(240, 244, 244, 0.58);
-  --surface-3: rgba(221, 226, 226, 0.64);
-  --surface-raised: rgba(205, 211, 212, 0.7);
-  --input-bg: rgba(255, 255, 255, 0.48);
-  --border: rgba(41, 49, 50, 0.18);
-  --border-strong: rgba(41, 49, 50, 0.38);
-  --text: #202728;
-  --muted: #4f5a5b;
-  --subtle: #788486;
-  --accent: #4f5b5c;
-  --accent-primary: #4f5b5c;
-  --accent-hover: #30393a;
-  --accent-pressed: #6d797a;
-  --accent-bright: #202728;
-  --accent-soft: rgba(64, 75, 76, 0.11);
-  --selection: rgba(64, 75, 76, 0.13);
-  --success: #374345;
-  --warning: #596466;
+  --canvas: #b9cde5;
+  --surface-1: rgba(221, 235, 250, 0.84);
+  --surface-2: rgba(205, 224, 245, 0.8);
+  --surface-3: rgba(185, 211, 239, 0.84);
+  --surface-raised: rgba(164, 197, 232, 0.86);
+  --input-bg: rgba(248, 252, 255, 0.76);
+  --border: rgba(30, 82, 143, 0.26);
+  --border-strong: rgba(30, 82, 143, 0.48);
+  --text: #15263d;
+  --muted: #4f6885;
+  --subtle: #7187a1;
+  --accent: #286fcf;
+  --accent-primary: #286fcf;
+  --accent-hover: #185eba;
+  --accent-pressed: #1550a0;
+  --accent-bright: #174f9a;
+  --accent-soft: rgba(46, 121, 218, 0.13);
+  --selection: rgba(47, 125, 222, 0.17);
+  --success: #14845f;
+  --warning: #946a10;
   --danger: #b35f55;
-  --info: #465456;
-  --status-success: #374345;
-  --status-warning: #596466;
+  --info: #286fcf;
+  --status-success: #14845f;
+  --status-warning: #946a10;
   --status-error: #b35f55;
-  --status-info: #465456;
-  --glass: rgba(249, 252, 252, 0.6);
-  --glass-soft: rgba(240, 244, 244, 0.5);
-  --glass-strong: rgba(223, 229, 229, 0.7);
-  --shadow-soft: 0 20px 44px rgba(50, 61, 62, 0.16), inset 0 1px rgba(255, 255, 255, 0.92);
+  --status-info: #286fcf;
+  --glass: rgba(221, 235, 250, 0.84);
+  --glass-soft: rgba(205, 224, 245, 0.78);
+  --glass-strong: rgba(185, 211, 239, 0.84);
+  --shadow-soft: 0 18px 38px rgba(40, 88, 145, 0.16), inset 0 1px rgba(255, 255, 255, 0.74);
+}
+
+.workbench-main .response-panel .response-panel__empty {
+  display: grid;
+  flex: 1 1 auto;
+  align-content: center;
+  gap: 8px;
+  min-height: 0;
+  padding-bottom: 30px;
+}
+
+/* The workspace controls share the rail material instead of being cut off by
+   a hard horizontal rule just above them. */
+.sidebar-footer {
+  border-top-color: transparent !important;
+  background: linear-gradient(180deg, transparent, rgba(11, 27, 48, 0.78) 32%) !important;
+}
+:root[data-theme='light'] .sidebar-footer {
+  background: linear-gradient(180deg, transparent, rgba(211, 228, 246, 0.9) 32%) !important;
 }
 :root[data-theme='light'] body,
 :root[data-theme='light'] .monitor-shell,
@@ -2861,12 +3068,12 @@ select:focus-visible { outline-color: rgba(245, 251, 251, 0.72); }
 :root[data-theme='light'] .traffic-layout,
 :root[data-theme='light'] .workbench-main,
 :root[data-theme='light'] .client-onboarding,
-:root[data-theme='light'] .request-table__empty:has(.onboarding-empty-state) { background: radial-gradient(860px 560px at 84% -16%, rgba(255, 255, 255, 0.9), transparent 67%), radial-gradient(700px 500px at -9% 102%, rgba(176, 187, 188, 0.28), transparent 72%), #d8dcdd !important; }
+:root[data-theme='light'] .request-table__empty:has(.onboarding-empty-state) { background: radial-gradient(860px 560px at 84% -16%, rgba(235, 246, 255, 0.72), transparent 67%), radial-gradient(700px 500px at -9% 102%, rgba(119, 172, 228, 0.28), transparent 72%), #cbd9e9 !important; }
 :root[data-theme='light'] .connection-sidebar,
-:root[data-theme='light'] .sidebar-footer { background: rgba(235, 239, 239, 0.68) !important; }
-:root[data-theme='light'] .monitor-mode-switch { background: rgba(243, 247, 247, 0.57) !important; }
+:root[data-theme='light'] .sidebar-footer { background: rgba(211, 228, 246, 0.82) !important; }
+:root[data-theme='light'] .monitor-mode-switch { background: rgba(225, 239, 253, 0.84) !important; }
 :root[data-theme='light'] .traffic-view,
-:root[data-theme='light'] .unary-workbench { background: rgba(247, 250, 250, 0.25) !important; }
+:root[data-theme='light'] .unary-workbench { background: rgba(223, 238, 253, 0.5) !important; }
 :root[data-theme='light'] .sidebar-footer .workspace-chip,
 :root[data-theme='light'] .secondary-command,
 :root[data-theme='light'] .icon-command,
@@ -2890,7 +3097,7 @@ select:focus-visible { outline-color: rgba(245, 251, 251, 0.72); }
 :root[data-theme='light'] .method-summary div,
 :root[data-theme='light'] .stream-panel__summary div,
 :root[data-theme='light'] .stream-panel__call,
-:root[data-theme='light'] .traffic-inspector__code { background: rgba(255, 255, 255, 0.43) !important; }
-:root[data-theme='light'] .primary-command { border-color: rgba(37, 46, 47, 0.54) !important; background: linear-gradient(145deg, #566263, #323b3c) !important; color: #f7fbfb !important; }
-:root[data-theme='light'] .primary-command:hover:not(:disabled) { background: linear-gradient(145deg, #435051, #242c2d) !important; }
-:root[data-theme='light'] .onboarding-empty-state__signal { box-shadow: inset 0 0 0 8px rgba(245, 248, 248, 0.88), inset 0 0 0 9px rgba(58, 69, 70, 0.45) !important; }
+:root[data-theme='light'] .traffic-inspector__code { background: rgba(255, 255, 255, 0.54) !important; }
+:root[data-theme='light'] .primary-command { border-color: rgba(27, 95, 187, 0.66) !important; background: linear-gradient(145deg, #377dd8, #235ba9) !important; color: #f7fbff !important; }
+:root[data-theme='light'] .primary-command:hover:not(:disabled) { background: linear-gradient(145deg, #4b8ee4, #2969bd) !important; }
+:root[data-theme='light'] .onboarding-empty-state__signal { box-shadow: inset 0 0 0 8px rgba(248, 252, 255, 0.92), inset 0 0 0 9px rgba(42, 111, 204, 0.52) !important; }
